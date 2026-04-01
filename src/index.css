@@ -1,0 +1,72 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&family=Playfair+Display:ital,wght@1,400;1,700;1,900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-serif: "Playfair Display", serif;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  
+  body {
+    background-color: white !important;
+  }
+
+  @page {
+    margin: 1cm;
+  }
+
+  /* Hide elements with print:hidden class */
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* Ensure the book container is visible and styled correctly for print */
+  .web-book-container {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: white !important;
+    display: block !important;
+  }
+
+  /* Ensure chapters start on new pages */
+  section[id^="chapter-"] {
+    break-before: page !important;
+    page-break-before: always !important;
+    margin-top: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    min-height: auto !important;
+    padding: 2cm !important;
+  }
+
+  /* First chapter doesn't need a break before it */
+  section#chapter-0 {
+    break-before: auto !important;
+    page-break-before: auto !important;
+  }
+
+  /* Hide scrollbars and other UI elements */
+  body {
+    overflow: visible !important;
+  }
+
+  #root {
+    overflow: visible !important;
+  }
+}
