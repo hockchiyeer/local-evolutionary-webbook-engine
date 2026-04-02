@@ -97,28 +97,38 @@ const SOURCE_PORTAL_CARDS: Array<{
   key: SearchSourceKey;
   label: string;
   description: string;
+  usage: string;
 }> = [
   {
     key: "wikipedia",
-    label: "Hybrid Wikipedia API",
+    label: "Wikipedia",
     description: "Primary encyclopedic anchor enriched by local TF-IDF and LSA filtering.",
+    usage: "Best for grounded topic overviews, entities, timelines, and reliable conceptual scaffolding.",
   },
   {
     key: "duckduckgo",
     label: "DuckDuckGo",
     description: "Broad public-web discovery with lightweight result extraction.",
+    usage: "Use it to widen coverage across blogs, articles, and public websites beyond encyclopedic summaries.",
   },
   {
     key: "google",
     label: "Google",
     description: "Additional web-result coverage when publicly accessible.",
+    usage: "Turn it on when you want extra result diversity and broader web discovery for the topic.",
   },
   {
     key: "bing",
     label: "Bing",
     description: "Alternative ranking and source diversity from another engine.",
+    usage: "Useful for another ranking perspective when you want more varied public-web sources.",
   },
 ];
+
+const getSourceToggleTitle = (
+  source: (typeof SOURCE_PORTAL_CARDS)[number],
+  enabled: boolean,
+) => `${source.label}: ${source.description} ${source.usage} ${enabled ? 'Toggle off to exclude it from the next search.' : 'Toggle on to include it in the next search.'}`;
 
 const normalizeManualUrl = (value: string) => {
   const trimmed = value.trim().replace(/[),.;]+$/g, "");
@@ -1612,37 +1622,51 @@ export default function App() {
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-3">
               {SOURCE_PORTAL_CARDS.map((source) => {
                 const checked = sourceConfig.sources[source.key];
+                const sourceToggleTitle = getSourceToggleTitle(source, checked);
+
                 return (
-                  <label
+                  <article
                     key={source.key}
                     id={`source-label-${source.key}`}
-                    className={`border p-4 transition-all ${checked ? 'bg-[#141414] text-[#E4E3E0]' : 'bg-[#F8F8F8] text-[#141414]'} ${isBusy ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer hover:translate-x-[2px] hover:translate-y-[2px]'}`}
-                    title={`Toggle ${source.label} as a search source`}
+                    className={`border p-3 transition-all ${checked ? 'bg-[#141414] text-[#E4E3E0]' : 'bg-[#F8F8F8] text-[#141414]'} ${isBusy ? 'opacity-70' : 'hover:translate-x-[2px] hover:translate-y-[2px]'}`}
+                    title={sourceToggleTitle}
                   >
-                    <input
-                      id={`source-checkbox-${source.key}`}
-                      type="checkbox"
-                      className="sr-only"
-                      checked={checked}
-                      disabled={isBusy}
-                      onChange={() => toggleBuiltInSource(source.key)}
-                      title={`Toggle ${source.label} as a search source`}
-                    />
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <span className="block text-[11px] uppercase font-bold tracking-widest">{source.label}</span>
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                      <div className="min-w-0">
+                        <span className="block text-[11px] uppercase font-bold tracking-[0.24em]">{source.label}</span>
                         <p className={`mt-2 text-[10px] leading-relaxed ${checked ? 'opacity-80' : 'opacity-60'}`}>
                           {source.description}
                         </p>
                       </div>
-                      <span className={`text-[9px] uppercase font-bold tracking-widest border px-2 py-1 ${checked ? 'border-white/30 bg-white/10' : 'border-[#141414]/20 bg-white'}`}>
-                        {checked ? 'On' : 'Off'}
-                      </span>
+                      <button
+                        id={`source-checkbox-${source.key}`}
+                        type="button"
+                        role="switch"
+                        aria-checked={checked}
+                        disabled={isBusy}
+                        onClick={() => toggleBuiltInSource(source.key)}
+                        className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full border transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[#141414] focus-visible:ring-offset-2 ${
+                          checked
+                            ? 'border-white/30 bg-white/10'
+                            : 'border-[#141414]/20 bg-white'
+                        } ${isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:scale-[1.03]'}`}
+                        title={sourceToggleTitle}
+                        aria-label={`${checked ? 'Turn off' : 'Turn on'} ${source.label}. ${source.usage}`}
+                      >
+                        <span
+                          className={`absolute top-1/2 left-0 h-4 w-4 -translate-y-1/2 rounded-full transition-transform ${
+                            checked
+                              ? 'translate-x-[1.3rem] bg-[#E4E3E0]'
+                              : 'translate-x-1 bg-[#141414]'
+                          }`}
+                        />
+                        <span className="sr-only">{checked ? `Disable ${source.label}` : `Enable ${source.label}`}</span>
+                      </button>
                     </div>
-                  </label>
+                  </article>
                 );
               })}
             </div>
@@ -1683,7 +1707,7 @@ export default function App() {
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(15rem,1fr))] gap-3">
                 {EXECUTION_MODE_CARDS.map((mode) => {
                   const selected = sourceConfig.executionMode === mode.key;
 
@@ -1694,20 +1718,20 @@ export default function App() {
                       type="button"
                       onClick={() => setExecutionMode(mode.key)}
                       disabled={isBusy}
-                      className={`text-left border p-4 transition-all ${
+                      className={`min-w-0 text-left border p-4 transition-all ${
                         selected ? 'bg-[#141414] text-[#E4E3E0]' : 'bg-[#F8F8F8] text-[#141414]'
                       } ${isBusy ? 'opacity-70 cursor-not-allowed' : 'hover:translate-x-[2px] hover:translate-y-[2px]'}`}
                       aria-pressed={selected}
                       title={mode.description}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
+                      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+                        <div className="min-w-0">
                           <span className="block text-[11px] uppercase font-bold tracking-widest">{mode.label}</span>
                           <p className={`mt-2 text-[10px] leading-relaxed ${selected ? 'opacity-80' : 'opacity-60'}`}>
                             {mode.description}
                           </p>
                         </div>
-                        <span className={`text-[9px] uppercase font-bold tracking-widest border px-2 py-1 ${
+                        <span className={`mt-0.5 shrink-0 whitespace-nowrap text-[8px] uppercase font-bold tracking-[0.24em] border px-2 py-1 ${
                           selected ? 'border-white/30 bg-white/10' : 'border-[#141414]/20 bg-white'
                         }`}>
                           {selected ? 'Active' : 'Select'}
