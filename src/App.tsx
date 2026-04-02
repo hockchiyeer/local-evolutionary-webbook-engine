@@ -130,6 +130,29 @@ const getSourceToggleTitle = (
   enabled: boolean,
 ) => `${source.label}: ${source.description} ${source.usage} ${enabled ? 'Toggle off to exclude it from the next search.' : 'Toggle on to include it in the next search.'}`;
 
+type PdfLinkAnnotation = {
+  sourcePageNumber: number;
+  targetPageNumber: number;
+  xRatio: number;
+  yRatio: number;
+  widthRatio: number;
+  heightRatio: number;
+};
+
+const PDF_EXPORT_PAGE_WIDTH = 794;
+const PDF_EXPORT_PAGE_HEIGHT = 1123;
+const PDF_IMAGE_MAX_DIMENSION = 1400;
+
+const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+const getPdfRenderScale = (pageCount: number) => {
+  if (pageCount >= 18) return 1.05;
+  if (pageCount >= 12) return 1.15;
+  if (pageCount >= 8) return 1.3;
+  if (pageCount >= 5) return 1.45;
+  return 1.6;
+};
+
 const normalizeManualUrl = (value: string) => {
   const trimmed = value.trim().replace(/[),.;]+$/g, "");
   if (!trimmed) return "";
@@ -402,6 +425,9 @@ export default function App() {
     (total, plan) => total + plan.renderableDefinitions.length,
     0
   );
+  const finalDocumentPageNumber = chapterRenderPlan.length > 0
+    ? (chapterRenderPlan[chapterRenderPlan.length - 1].analysisPageNumber ?? chapterRenderPlan[chapterRenderPlan.length - 1].titlePageNumber) + 1
+    : 3;
   const isBusy = state.status !== 'idle' && state.status !== 'complete';
   const enabledBuiltInSourceCount = Object.values(sourceConfig.sources).filter(Boolean).length;
   const totalEnabledSourceCount = enabledBuiltInSourceCount + sourceConfig.manualUrls.length;
@@ -948,7 +974,7 @@ export default function App() {
 
     for (const img of images) {
       try {
-        if (img.src.startsWith('data:')) {
+        if (!img.src || img.src.startsWith('data:') || img.style.display === 'none') {
           continue;
         }
 
@@ -971,17 +997,16 @@ export default function App() {
           tempImg.src = img.src;
         });
 
-        const maxDimension = 1400;
         let width = tempImg.width;
         let height = tempImg.height;
 
-        if (width > maxDimension || height > maxDimension) {
+        if (width > PDF_IMAGE_MAX_DIMENSION || height > PDF_IMAGE_MAX_DIMENSION) {
           if (width >= height) {
-            height = Math.round((height / width) * maxDimension);
-            width = maxDimension;
+            height = Math.round((height / width) * PDF_IMAGE_MAX_DIMENSION);
+            width = PDF_IMAGE_MAX_DIMENSION;
           } else {
-            width = Math.round((width / height) * maxDimension);
-            height = maxDimension;
+            width = Math.round((width / height) * PDF_IMAGE_MAX_DIMENSION);
+            height = PDF_IMAGE_MAX_DIMENSION;
           }
         }
 
@@ -996,8 +1021,85 @@ export default function App() {
 
       img.style.filter = 'none';
       img.style.boxShadow = 'none';
+      img.className = img.className.replace(/grayscale|hover:grayscale-0/g, '');
     }
   };
+
+  const createHiddenPdfExportClone = () => {
+    const clone = createCleanExportClone();
+    if (!clone) {
+      return null;
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.setAttribute('aria-hidden', 'true');
+    Object.assign(wrapper.style, {
+      position: 'fixed',
+      left: '-20000px',
+      top: '0',
+      width: `${PDF_EXPORT_PAGE_WIDTH}px`,
+      zIndex: '-1',
+      pointerEvents: 'none',
+      background: 'white',
+      overflow: 'hidden',
+    });
+
+    clone.style.width = `${PDF_EXPORT_PAGE_WIDTH}px`;
+    clone.style.maxWidth = `${PDF_EXPORT_PAGE_WIDTH}px`;
+    clone.style.margin = '0';
+    clone.style.padding = '0';
+    clone.style.background = 'transparent';
+    clone.style.boxShadow = 'none';
+    clone.style.border = 'none';
+    clone.style.gap = '0';
+
+    clone.querySelectorAll<HTMLElement>('[data-pdf-page-number]').forEach((page) => {
+      page.style.width = `${PDF_EXPORT_PAGE_WIDTH}px`;
+      page.style.minHeight = `${PDF_EXPORT_PAGE_HEIGHT}px`;
+      page.style.margin = '0';
+      page.style.borderRadius = '0';
+      page.style.boxShadow = 'none';
+      page.style.overflow = 'hidden';
+      page.style.setProperty('break-inside', 'avoid');
+      page.style.pageBreakAfter = 'always';
+    });
+
+    wrapper.appendChild(clone);
+    document.body.appendChild(wrapper);
+
+    return {
+      clone,
+      cleanup: () => wrapper.remove(),
+    };
+  };
+
+  const collectPdfLinkAnnotations = (root: HTMLElement): PdfLinkAnnotation[] =>
+    Array.from(root.querySelectorAll<HTMLElement>('[data-pdf-target-page]'))
+      .map((element) => {
+        const sourcePage = element.closest<HTMLElement>('[data-pdf-page-number]');
+        const sourcePageNumber = Number(sourcePage?.dataset.pdfPageNumber);
+        const targetPageNumber = Number(element.dataset.pdfTargetPage);
+
+        if (!sourcePage || !Number.isFinite(sourcePageNumber) || !Number.isFinite(targetPageNumber)) {
+          return null;
+        }
+
+        const sourceRect = sourcePage.getBoundingClientRect();
+        const elementRect = element.getBoundingClientRect();
+        if (!sourceRect.width || !sourceRect.height || !elementRect.width || !elementRect.height) {
+          return null;
+        }
+
+        return {
+          sourcePageNumber,
+          targetPageNumber,
+          xRatio: (elementRect.left - sourceRect.left) / sourceRect.width,
+          yRatio: (elementRect.top - sourceRect.top) / sourceRect.height,
+          widthRatio: elementRect.width / sourceRect.width,
+          heightRatio: elementRect.height / sourceRect.height,
+        };
+      })
+      .filter((annotation): annotation is PdfLinkAnnotation => Boolean(annotation));
 
   const getHeadMarkupForPrint = () => Array.from(
     document.head.querySelectorAll('style, link[rel="stylesheet"]')
@@ -1160,61 +1262,121 @@ export default function App() {
 
   const exportToPDF = async () => {
     if (!webBook) return;
-    const clone = createCleanExportClone();
-    if (!clone) {
-      alert("Could not find the book container to export.");
-      return;
-    }
 
     setIsExporting(true);
     setShowExportOptions(false);
 
-    let appended = false;
+    let cleanup: (() => void) | null = null;
 
     try {
-      const h2p = (window as any).html2pdf;
-      if (typeof h2p !== 'function') {
-        throw new Error('html2pdf library not loaded from CDN');
+      const hiddenClone = createHiddenPdfExportClone();
+      if (!hiddenClone) {
+        throw new Error('Could not find the book container to export.');
       }
 
-      clone.style.width = '800px';
-      clone.style.maxWidth = '800px';
-      clone.style.background = 'white';
-      clone.style.margin = '0';
-      clone.style.position = 'absolute';
-      clone.style.left = '-100000px';
-      clone.style.top = '0';
-      document.body.appendChild(clone);
-      appended = true;
+      cleanup = hiddenClone.cleanup;
+      const { clone } = hiddenClone;
 
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+        import('html2canvas'),
+        import('jspdf'),
+      ]);
+
+      await wait(80);
       await inlinePdfImages(clone);
+      await wait(80);
 
-      const opt: any = {
-        margin: [10, 10] as [number, number],
-        filename: `${getExportBaseName()}.pdf`,
-        image: { type: 'jpeg', quality: 0.82 },
-        html2canvas: {
-          scale: 1,
-          useCORS: false,
-          logging: false,
-          letterRendering: true,
-          allowTaint: true,
-          removeContainer: true,
-          imageTimeout: 0,
-          backgroundColor: '#ffffff',
-        },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
-        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
-      };
+      await document.fonts?.ready?.catch(() => undefined);
 
-      await h2p().from(clone).set(opt).save();
+      const pages = Array.from(clone.querySelectorAll<HTMLElement>('[data-pdf-page-number]'));
+      if (pages.length === 0) {
+        throw new Error('No paged content found for PDF export.');
+      }
+
+      const linkAnnotations = collectPdfLinkAnnotations(clone);
+      const pdf = new jsPDF({
+        unit: 'mm',
+        format: 'a4',
+        orientation: 'portrait',
+        compress: true,
+        putOnlyUsedFonts: true,
+      });
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const renderScale = getPdfRenderScale(pages.length);
+
+      for (const [index, page] of pages.entries()) {
+        if (index > 0) {
+          pdf.addPage();
+        }
+
+        let canvas: HTMLCanvasElement;
+        try {
+          canvas = await html2canvas(page, {
+            scale: renderScale,
+            useCORS: true,
+            logging: false,
+            backgroundColor: '#ffffff',
+            imageTimeout: 15000,
+            removeContainer: true,
+            foreignObjectRendering: false,
+            windowWidth: PDF_EXPORT_PAGE_WIDTH,
+            windowHeight: PDF_EXPORT_PAGE_HEIGHT,
+            scrollX: 0,
+            scrollY: 0,
+          });
+        } catch (pageError) {
+          console.warn('Primary PDF page render failed, retrying without images:', pageError);
+          page.querySelectorAll('img').forEach((img) => {
+            if (img instanceof HTMLElement) {
+              img.style.display = 'none';
+            }
+          });
+
+          canvas = await html2canvas(page, {
+            scale: Math.max(1, renderScale - 0.25),
+            useCORS: true,
+            logging: false,
+            backgroundColor: '#ffffff',
+            imageTimeout: 10000,
+            removeContainer: true,
+            foreignObjectRendering: false,
+            windowWidth: PDF_EXPORT_PAGE_WIDTH,
+            windowHeight: PDF_EXPORT_PAGE_HEIGHT,
+            scrollX: 0,
+            scrollY: 0,
+          });
+        }
+
+        const imageData = canvas.toDataURL('image/jpeg', 0.9);
+        pdf.addImage(imageData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'MEDIUM');
+
+        const sourcePageNumber = Number(page.dataset.pdfPageNumber);
+        if (Number.isFinite(sourcePageNumber)) {
+          linkAnnotations
+            .filter((annotation) => annotation.sourcePageNumber === sourcePageNumber)
+            .forEach((annotation) => {
+              pdf.link(
+                annotation.xRatio * pdfWidth,
+                annotation.yRatio * pdfHeight,
+                annotation.widthRatio * pdfWidth,
+                annotation.heightRatio * pdfHeight,
+                { pageNumber: annotation.targetPageNumber }
+              );
+            });
+        }
+
+        canvas.width = 0;
+        canvas.height = 0;
+        await wait(0);
+      }
+
+      pdf.save(`${getExportBaseName()}.pdf`);
     } catch (err) {
       console.error("PDF Export failed:", err);
-      alert("High-Res PDF export failed. Please use 'Print / Save as PDF (Lightweight)' for the most reliable local export.");
+      alert("High-res PDF export still hit a browser or embedded-app limit before finishing. The exporter now runs locally without the CDN helper, but very large books or blocked remote images can still fail. Please use 'Print / Save as PDF (Lightweight)' if this environment blocks the final render.");
     } finally {
-      if (appended && clone.parentNode) {
-        clone.parentNode.removeChild(clone);
-      }
+      cleanup?.();
       setIsExporting(false);
     }
   };
@@ -1936,7 +2098,11 @@ export default function App() {
                 {/* Document Container - Mimics A4/PDF */}
                 <div id="top" className="web-book-container w-full max-w-[850px] bg-white border border-[#141414] shadow-[12px_12px_0px_0px_rgba(20,20,20,1)] overflow-hidden print:shadow-none print:border-none print:max-w-none">
                   {/* PDF Style Header / Cover */}
-                  <div className="bg-[#141414] text-[#E4E3E0] p-16 relative overflow-hidden text-center min-h-[1000px] flex flex-col justify-center print:break-inside-avoid print:page-break-after-always">
+                  <div
+                    data-pdf-page-number="1"
+                    data-pdf-page-kind="cover"
+                    className="bg-[#141414] text-[#E4E3E0] p-16 relative overflow-hidden text-center min-h-[1000px] flex flex-col justify-center print:break-inside-avoid print:page-break-after-always"
+                  >
                     <div className="relative z-10">
                       <div className="flex flex-col items-center gap-4 mb-8">
                         <div className="w-12 h-12 border-2 border-[#E4E3E0] flex items-center justify-center rotate-45">
@@ -1972,7 +2138,11 @@ export default function App() {
                   </div>
 
                   {/* Table of Contents - Page 2 Style */}
-                  <div className="p-20 border-b border-[#141414] bg-[#FAFAFA] min-h-[1000px] flex flex-col print:break-inside-avoid print:page-break-after-always relative">
+                  <div
+                    data-pdf-page-number="2"
+                    data-pdf-page-kind="toc"
+                    className="p-20 border-b border-[#141414] bg-[#FAFAFA] min-h-[1000px] flex flex-col print:break-inside-avoid print:page-break-after-always relative"
+                  >
                     <h3 className="text-[14px] uppercase font-bold mb-16 tracking-[0.3em] border-b-2 border-[#141414] pb-6 inline-block self-start">Table of Contents</h3>
                     <div className="space-y-8 flex-1">
                       {chapterRenderPlan.map(({ chapter, titlePageNumber }, i) => (
@@ -1980,6 +2150,7 @@ export default function App() {
                           id={`toc-link-${i}`}
                           key={chapter.id || i} 
                           href={`#chapter-${i}`} 
+                          data-pdf-target-page={titlePageNumber}
                           className="flex items-end gap-6 group"
                           title={`Jump to Chapter ${i+1}: ${chapter.title}`}
                         >
@@ -2006,7 +2177,12 @@ export default function App() {
                       return (
                       <div key={chapter.id || i} className="space-y-12">
                         {/* Chapter Page 1: Title & Image */}
-                        <section id={`chapter-${i}`} className="p-16 bg-white border border-[#141414] shadow-sm min-h-[1000px] flex flex-col print:break-inside-avoid print:page-break-after-always">
+                        <section
+                          id={`chapter-${i}`}
+                          data-pdf-page-number={String(titlePageNumber)}
+                          data-pdf-page-kind="chapter"
+                          className="p-16 bg-white border border-[#141414] shadow-sm min-h-[1000px] flex flex-col print:break-inside-avoid print:page-break-after-always"
+                        >
                           <div className="flex items-center justify-between mb-12 border-b border-[#141414]/10 pb-6">
                             <div className="flex items-center gap-4">
                               <span className="w-10 h-10 bg-[#141414] text-white flex items-center justify-center font-mono text-sm">0{i+1}</span>
@@ -2049,7 +2225,11 @@ export default function App() {
 
                         {/* Chapter Page 2: Analysis & Glossary */}
                         {analysisPageNumber !== null && (
-                          <section className="p-16 bg-white border border-[#141414] shadow-sm min-h-[1000px] flex flex-col print:break-inside-avoid print:page-break-after-always">
+                          <section
+                            data-pdf-page-number={String(analysisPageNumber)}
+                            data-pdf-page-kind="analysis"
+                            className="p-16 bg-white border border-[#141414] shadow-sm min-h-[1000px] flex flex-col print:break-inside-avoid print:page-break-after-always"
+                          >
                             <div className="flex-1 space-y-12">
                               {renderableSubTopics.length > 0 && (
                                 <div className="space-y-8">
@@ -2139,7 +2319,11 @@ export default function App() {
                   </div>
 
                   {/* Document Footer - Inside export container for inclusion in PDF/Word */}
-                  <div className="p-16 bg-[#F5F5F5] border-t border-[#141414] flex flex-col md:flex-row justify-between items-center gap-8 w-full">
+                  <div
+                    data-pdf-page-number={String(finalDocumentPageNumber)}
+                    data-pdf-page-kind="footer"
+                    className="p-16 bg-[#F5F5F5] border-t border-[#141414] flex flex-col md:flex-row justify-between items-center gap-8 w-full"
+                  >
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
                         <CheckCircle2 className="text-green-600" size={20} />
@@ -2152,6 +2336,7 @@ export default function App() {
                     <div className="flex items-center gap-4">
                       <a 
                         href="#top"
+                        data-pdf-target-page={1}
                         onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
                         className="text-[10px] uppercase font-bold hover:underline flex items-center gap-2"
                         title="Scroll back to the top of the document"
@@ -2159,6 +2344,7 @@ export default function App() {
                         Back to Top
                       </a>
                     </div>
+                    <div className="text-[10px] font-mono opacity-40">PAGE {finalDocumentPageNumber}</div>
                   </div>
                 </div>
               </motion.div>
