@@ -24,6 +24,7 @@ from engine.ga import (
 )
 from engine.nlp import extract_subtopic_tree, semantic_similarity
 from engine.nlp_graph import concept_crawl_depth, expand_semantic_phrases, expand_semantic_terms
+from engine.query_profiles import build_query_profile, query_profile_alignment_score
 from engine.archetypes import get_chapter_templates
 from engine.normalize import (
     dedupe_results as dedupe_results_impl,
@@ -83,6 +84,8 @@ STOP_WORDS = {
     "this", "to", "was", "were", "what", "when", "where", "which", "with", "within",
     "about", "across", "after", "also", "among", "between", "during", "over", "under",
     "than", "then", "them", "these", "those", "through", "toward", "towards", "via",
+    "can", "could", "did", "do", "does", "may", "might", "should", "will", "would",
+    "team", "teams", "win", "winner", "winners", "change", "come", "decade", "decades",
 }
 
 ENTITY_VERB_PATTERN = re.compile(
@@ -293,6 +296,11 @@ def expand_query_focus_words(q_words):
 def semantic_query_terms(query_signature):
     terms = set(expand_semantic_terms(query_signature, max_depth=1, limit=24))
     return {term for term in terms if term not in STOP_WORDS}
+
+
+@lru_cache(maxsize=256)
+def cached_query_profile(query_signature):
+    return build_query_profile(query_signature)
 
 
 def chapter_depth_target(chapter_index, chapter_count):
@@ -590,6 +598,7 @@ def source_relevance(result, q_words):
     focus_words = expand_query_focus_words(q_words)
     query_signature = " ".join(sorted(q_words))
     semantic_focus_words = semantic_query_terms(query_signature)
+    query_profile = cached_query_profile(query_signature)
     
     # Base overlap score
     result_text = title + " " + content
@@ -620,6 +629,9 @@ def source_relevance(result, q_words):
         0.0,
         1.0,
     )
+    profile_alignment = query_profile_alignment_score(result_text, query_profile)
+    profile_bonus = max(profile_alignment, 0.0)
+    profile_penalty = max(-profile_alignment, 0.0)
 
     filler_terms = {
         "best", "can", "considering", "could", "decade", "decades", "how", "most",
@@ -651,7 +663,15 @@ def source_relevance(result, q_words):
         if not soft_match(primary_anchor, result_words) and len(q_words) > 3 and overlap > 0.0 and latent_similarity < 0.28:
             boost -= 0.10
 
-    return clamp(overlap + boost + (latent_similarity * 0.18), 0.0, 1.0)
+    return clamp(
+        overlap
+        + boost
+        + (latent_similarity * 0.18)
+        + (profile_bonus * 0.34)
+        - (profile_penalty * 0.48),
+        0.0,
+        1.0,
+    )
 
 
 def marginal_gain(result, selected_results, q_words):
@@ -792,8 +812,9 @@ def get_fallback_query(query):
     )
 
 
-def results_miss_query_focus(results, q_words):
+def results_miss_query_focus(query, results, q_words):
     return results_miss_query_focus_impl(
+        query,
         results,
         q_words,
         tokenize=tokenize,

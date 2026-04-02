@@ -906,7 +906,7 @@ def search_web_results(
     fetch_manual_sources: Callable[[Sequence[str], Dict[str, str]], Sequence[Dict[str, Any]]],
     dedupe_results: Callable[[Sequence[Dict[str, Any]], str], Sequence[Dict[str, Any]]],
     get_fallback_query: Callable[[str], str],
-    results_miss_query_focus: Callable[[Sequence[Dict[str, Any]], set], bool],
+    results_miss_query_focus: Callable[[str, Sequence[Dict[str, Any]], set], bool],
     build_adaptive_fallback_results: Callable[[str, Sequence[Dict[str, Any]], int], Sequence[Dict[str, Any]]],
     choose_user_agent: Callable[[], str],
     debug: Callable[[str], None],
@@ -931,7 +931,7 @@ def search_web_results(
     combined_preview = interleave_result_lists(*provider_results)
     focused_provider_results = []
     focused_query = get_fallback_query(query)
-    if focused_query != query and results_miss_query_focus(combined_preview, q_words):
+    if focused_query != query and results_miss_query_focus(query, combined_preview, q_words):
         debug(f"Query focus missing in initial results. Retrying with focused query: {focused_query}")
         focused_provider_results = list(perform_search(focused_query, source_selection))
 

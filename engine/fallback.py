@@ -8,6 +8,7 @@ from .archetypes import (
     get_fallback_facets,
     infer_query_archetype,
 )
+from .query_profiles import build_query_profile, query_profile_alignment_score
 from .titles import derive_topic_label
 
 
@@ -95,6 +96,7 @@ def get_fallback_query(
     stop_words: Set[str],
     normalize_space: Callable[[Any], str],
 ) -> str:
+    query_profile = build_query_profile(query)
     archetype = infer_query_archetype(
         query,
         (),
@@ -129,13 +131,25 @@ def get_fallback_query(
         seen.add(token)
 
     if len(prioritized) > 6:
-        return " ".join(prioritized[:6])
+        prioritized = prioritized[:6]
+    if query_profile.get("fallback_terms"):
+        for term in query_profile["fallback_terms"]:
+            for token in tokenize(term):
+                if token in filler_words or token in seen:
+                    continue
+                prioritized.append(token)
+                seen.add(token)
+                if len(prioritized) >= 8:
+                    break
+            if len(prioritized) >= 8:
+                break
     if prioritized:
         return " ".join(prioritized)
     return normalize_space(query)
 
 
 def results_miss_query_focus(
+    query: str,
     results: Sequence[Dict[str, Any]],
     q_words: Set[str],
     *,
@@ -145,6 +159,7 @@ def results_miss_query_focus(
     if not q_words:
         return False
 
+    query_profile = build_query_profile(query)
     focus_terms = expand_query_focus_words(set(q_words))
     anchor_terms = _derive_anchor_terms(set(q_words), max_terms=min(3, max(1, len(q_words))))
     match_count = 0
@@ -157,6 +172,9 @@ def results_miss_query_focus(
             continue
         if anchor_terms and not result_words.intersection(anchor_terms) and len(focus_terms) > 3:
             continue
+        if query_profile.get("name") != "generic":
+            if query_profile_alignment_score(result_text, query_profile) <= 0.0:
+                continue
         match_count += 1
 
     return match_count < min(len(results), 3)
@@ -326,6 +344,7 @@ def build_adaptive_fallback_results(
         stop_words=stop_words,
         normalize_space=normalize_space,
     )
+    query_profile = build_query_profile(query)
     topic_label = derive_topic_label(query, tokenize=tokenize, stop_words=stop_words) or normalize_space(query)
     canonical_topic_label = choose_canonical_topic_label(
         query,
@@ -346,7 +365,7 @@ def build_adaptive_fallback_results(
         normalize_term_key=normalize_term_key,
     )
     ordered_tokens = _ordered_focus_tokens(query, tokenize=tokenize, stop_words=stop_words)
-    evidence_terms = list(unique_preserve_order(phrases + ordered_tokens))
+    evidence_terms = list(unique_preserve_order(phrases + ordered_tokens + query_profile.get("fallback_terms", [])))
 
     if not evidence_terms:
         evidence_terms = [topic_label or "topic"]

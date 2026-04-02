@@ -6,6 +6,8 @@ import re
 from difflib import SequenceMatcher
 from typing import Any, Callable, Dict, List, Sequence, Set, Tuple
 
+from .query_profiles import build_query_profile
+
 
 QUESTION_WORDS = {
     "what", "when", "where", "which", "who", "why", "how",
@@ -56,6 +58,32 @@ PERSON_FALLBACK_FACETS: Sequence[Tuple[str, str]] = (
     ("Contemporary Relevance", "how present debates reinterpret the person's record and why the subject still matters"),
 )
 
+IMPACT_CHAPTER_TEMPLATES: Sequence[Tuple[str, Set[str]]] = (
+    ("Conflict Overview", {"overview", "conflict", "war", "scope", "background"}),
+    ("Immediate Triggers", {"trigger", "cause", "flashpoint", "decision", "initiation"}),
+    ("Regional Military Dynamics", {"regional", "military", "escalation", "security", "deterrence"}),
+    ("Energy and Trade", {"energy", "oil", "trade", "shipping", "supply"}),
+    ("Diplomatic Realignment", {"diplomacy", "alignment", "alliance", "mediation", "sanctions"}),
+    ("Domestic Political Effects", {"domestic", "political", "governance", "regime", "public"}),
+    ("Security Architecture", {"security", "defense", "architecture", "military", "posture"}),
+    ("Economic Spillovers", {"economy", "spillover", "inflation", "markets", "investment"}),
+    ("Scenario Paths", {"scenario", "path", "trajectory", "branch", "future"}),
+    ("Long-Horizon Outlook", {"outlook", "legacy", "decade", "systemic", "consequence"}),
+)
+
+IMPACT_FALLBACK_FACETS: Sequence[Tuple[str, str]] = (
+    ("Conflict Overview", "the baseline structure, actors, escalation pathway, and immediate stakes of the conflict"),
+    ("Immediate Triggers", "the proximate decisions, flashpoints, and strategic triggers that converted tension into war"),
+    ("Regional Military Dynamics", "how force posture, deterrence failure, regional proxies, and escalation risks shape the conflict"),
+    ("Energy and Trade", "how shipping, oil, sanctions, and supply-chain disruption transmit the conflict into the wider world"),
+    ("Diplomatic Realignment", "how states reposition, hedge, sanction, mediate, or harden alliances as the conflict unfolds"),
+    ("Domestic Political Effects", "how the conflict changes regime stability, civil society, internal repression, and state capacity"),
+    ("Security Architecture", "how the war alters long-run defense posture, arms racing, alliance commitments, and regional security design"),
+    ("Economic Spillovers", "how inflation, markets, investment, and fiscal burdens change across regions over time"),
+    ("Scenario Paths", "the main branching trajectories, escalation ladders, and negotiated off-ramps that determine next steps"),
+    ("Long-Horizon Outlook", "the decade-scale structural consequences for geopolitics, energy, institutions, and strategic competition"),
+)
+
 
 def _raw_word_tokens(text: str) -> List[str]:
     return re.findall(r"[A-Za-z][A-Za-z'.-]{1,}", str(text or ""))
@@ -94,10 +122,15 @@ def infer_query_archetype(
     normalize_space: Callable[[Any], str],
 ) -> str:
     normalized_query = normalize_space(query)
+    query_profile = build_query_profile(normalized_query)
     raw_tokens = _raw_word_tokens(normalized_query)
     lowered_tokens = [token.lower() for token in raw_tokens]
     filtered_tokens = [token for token in lowered_tokens if token not in stop_words]
 
+    if "impact_forecast" in query_profile.get("intent_tags", set()):
+        return "impact"
+    if "sports_event" in query_profile.get("intent_tags", set()):
+        return "generic"
     if _supports_person_archetype(supporting_results, normalize_space=normalize_space):
         return "person"
 
@@ -167,6 +200,8 @@ def get_chapter_templates(
     )
     if archetype == "person":
         return PERSON_CHAPTER_TEMPLATES
+    if archetype == "impact":
+        return IMPACT_CHAPTER_TEMPLATES
     return default_templates
 
 
@@ -188,4 +223,6 @@ def get_fallback_facets(
     )
     if archetype == "person":
         return PERSON_FALLBACK_FACETS
+    if archetype == "impact":
+        return IMPACT_FALLBACK_FACETS
     return generic_facets

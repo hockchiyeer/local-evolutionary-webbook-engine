@@ -5,6 +5,8 @@ from evolution_engine import (
     evolve,
     generate_webbook,
     get_fallback_query,
+    query_words,
+    source_relevance,
 )
 
 
@@ -15,6 +17,8 @@ LONG_AI_QUERY = (
     "high-value application domains, and how should enterprises and policymakers "
     "prioritize strategic bets, capability building, and risk mitigation in response?"
 )
+THOMAS_CUP_QUERY = "Which team will win Thomas Cup 2026"
+US_WORLD_CUP_QUERY = "Which team will win US World Cup 2026"
 
 
 class QueryFocusTests(unittest.TestCase):
@@ -172,6 +176,64 @@ class QueryFocusTests(unittest.TestCase):
             self.assertNotIn(LONG_AI_QUERY.lower(), title)
             self.assertNotIn("what is the most probable", title)
             self.assertLess(len(title), 110)
+
+    def test_thomas_cup_query_disambiguates_toward_badminton(self):
+        fallback_query = get_fallback_query(THOMAS_CUP_QUERY).lower()
+        self.assertIn("thomas", fallback_query)
+        self.assertTrue("badminton" in fallback_query or "bwf" in fallback_query)
+
+        badminton_result = {
+            "title": "Thomas Cup 2026 badminton contenders and BWF team form",
+            "url": "https://example.com/thomas-cup",
+            "content": (
+                "Thomas Cup 2026 is the men's world team badminton championship, and contender analysis centers "
+                "on squad depth, doubles strength, and BWF tournament form."
+            ),
+            "informativeScore": 0.84,
+            "authorityScore": 0.78,
+        }
+        football_result = {
+            "title": "2026 FIFA World Cup host format",
+            "url": "https://example.com/fifa",
+            "content": "The 2026 FIFA World Cup is a men's soccer tournament hosted by the United States, Mexico, and Canada.",
+            "informativeScore": 0.82,
+            "authorityScore": 0.82,
+        }
+
+        q_words = query_words(THOMAS_CUP_QUERY)
+        self.assertGreater(source_relevance(badminton_result, q_words), source_relevance(football_result, q_words))
+        evolved = evolve([football_result, badminton_result], THOMAS_CUP_QUERY)
+        self.assertTrue(evolved)
+        self.assertTrue(any(term in evolved[0]["title"].lower() for term in ("thomas", "badminton", "bwf")))
+
+    def test_us_world_cup_query_disambiguates_toward_fifa(self):
+        fallback_query = get_fallback_query(US_WORLD_CUP_QUERY).lower()
+        self.assertIn("world", fallback_query)
+        self.assertTrue("fifa" in fallback_query or "soccer" in fallback_query)
+
+        fifa_result = {
+            "title": "2026 FIFA World Cup contender analysis",
+            "url": "https://example.com/fifa-world-cup",
+            "content": (
+                "The 2026 FIFA World Cup is the men's soccer championship hosted by the United States, Mexico, and "
+                "Canada, and contender analysis focuses on national-team depth and tournament pathways."
+            ),
+            "informativeScore": 0.86,
+            "authorityScore": 0.84,
+        }
+        cricket_result = {
+            "title": "2026 ICC Men's T20 World Cup final outlook",
+            "url": "https://example.com/t20",
+            "content": "The ICC Men's T20 World Cup is an international cricket tournament contested by national cricket teams.",
+            "informativeScore": 0.84,
+            "authorityScore": 0.8,
+        }
+
+        q_words = query_words(US_WORLD_CUP_QUERY)
+        self.assertGreater(source_relevance(fifa_result, q_words), source_relevance(cricket_result, q_words))
+        evolved = evolve([cricket_result, fifa_result], US_WORLD_CUP_QUERY)
+        self.assertTrue(evolved)
+        self.assertTrue(any(term in evolved[0]["title"].lower() for term in ("fifa", "soccer", "world cup")))
 
 
 if __name__ == "__main__":
