@@ -68,9 +68,9 @@ const SOURCE_PORTAL_STORAGE_KEY = "webbook_source_config";
 const DEFAULT_SOURCE_CONFIG: SearchSourceConfig = {
   sources: {
     wikipedia: true,
-    duckduckgo: true,
-    google: true,
-    bing: true,
+    duckduckgo: false,
+    google: false,
+    bing: false,
   },
   manualUrls: [],
   executionMode: "sequential",
@@ -100,8 +100,8 @@ const SOURCE_PORTAL_CARDS: Array<{
 }> = [
   {
     key: "wikipedia",
-    label: "Wikipedia",
-    description: "High-signal encyclopedic grounding and historical context.",
+    label: "Hybrid Wikipedia API",
+    description: "Primary encyclopedic anchor enriched by local TF-IDF and LSA filtering.",
   },
   {
     key: "duckduckgo",
@@ -210,7 +210,7 @@ const formatJson = (value: unknown) => {
 const getProviderLabel = (provider: string) => {
   switch (provider) {
     case "wikipedia":
-      return "Wikipedia";
+      return "Hybrid Wikipedia API";
     case "duckduckgo":
       return "DuckDuckGo";
     case "google":

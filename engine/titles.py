@@ -4,6 +4,7 @@ import re
 from typing import Any, Callable, Dict, List, Sequence, Set
 
 from .contracts import CHAPTER_TITLE_MAX_CHARS, CHAPTER_TITLE_MAX_WORDS
+from .nlp_graph import concept_crawl_depth, expand_semantic_phrases
 
 
 QUESTION_FILLER_WORDS = {
@@ -63,6 +64,10 @@ def _trim_title(value: str) -> str:
     return shortened or value[:CHAPTER_TITLE_MAX_CHARS].strip(" :;,-")
 
 
+def _semantic_key(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip().lower()
+
+
 def _compact_phrase(
     text: str,
     *,
@@ -110,6 +115,29 @@ def derive_topic_label(
     return _compact_phrase(query, tokenize=tokenize, stop_words=stop_words, max_words=4)
 
 
+def _chapter_depth_target(chapter_index: int, chapter_count: int) -> str:
+    if chapter_count <= 1:
+        return "seed"
+    position = chapter_index / max(chapter_count - 1, 1)
+    if position <= 0.25:
+        return "seed"
+    if position <= 0.7:
+        return "related"
+    return "tangential"
+
+
+def _semantic_layer_bonus(layer: str, target_layer: str) -> float:
+    if layer == target_layer:
+        return 0.24
+    if target_layer == "seed" and layer == "related":
+        return 0.12
+    if target_layer == "related" and layer in {"seed", "tangential"}:
+        return 0.08
+    if target_layer == "tangential" and layer == "related":
+        return 0.12
+    return 0.0
+
+
 def build_chapter_title(
     base_label: str,
     query: str,
@@ -120,6 +148,10 @@ def build_chapter_title(
     focus_words: Set[str],
     template_keywords: Set[str],
     *,
+    semantic_subtopic_tree: Sequence[Dict[str, Any]] = (),
+    semantic_title_focus: str = "",
+    chapter_index: int = 0,
+    chapter_count: int = 10,
     tokenize: Callable[[str], Sequence[str]],
     stop_words: Set[str],
     normalize_term_key: Callable[[str], str],
@@ -128,9 +160,16 @@ def build_chapter_title(
     base_key = normalize_term_key(base_label)
     topic_label = derive_topic_label(query, tokenize=tokenize, stop_words=stop_words)
     candidates: List[str] = [focus_phrase]
+    target_layer = _chapter_depth_target(chapter_index, chapter_count)
+    semantic_focus_key = _semantic_key(semantic_title_focus)
+
+    if semantic_title_focus:
+        candidates.insert(0, semantic_title_focus)
 
     candidates.extend(definition.get("term", "") for definition in chapter_definitions)
     candidates.extend(subtopic.get("title", "") for subtopic in chapter_subtopics)
+    candidates.extend(topic.get("label", "") for topic in semantic_subtopic_tree if isinstance(topic, dict))
+    candidates.extend(expand_semantic_phrases(query, max_depth=2, limit=max(6, chapter_count)))
 
     for source in supporting_sources[:3]:
         candidates.append(source.get("title", ""))
@@ -138,6 +177,26 @@ def build_chapter_title(
             candidates.append(definition.get("term", ""))
         for subtopic in (source.get("subTopics", []) or [])[:2]:
             candidates.append(subtopic.get("title", ""))
+
+    semantic_bonus_by_key: Dict[str, float] = {}
+    for offset, topic in enumerate(semantic_subtopic_tree):
+        if not isinstance(topic, dict):
+            continue
+        label = topic.get("label", "")
+        label_key = _semantic_key(label)
+        if not label_key:
+            continue
+        divergence = float(topic.get("divergence", 0.0))
+        branch_bonus = max(0.0, 0.20 - (offset * 0.015))
+        semantic_bonus_by_key[label_key] = max(
+            semantic_bonus_by_key.get(label_key, 0.0),
+            branch_bonus + min(divergence * 0.14, 0.14),
+        )
+
+    depth_map = {
+        _semantic_key(item.get("node", "")): item
+        for item in concept_crawl_depth(query, [candidate for candidate in candidates if candidate])
+    }
 
     scored_candidates = []
     for candidate in candidates:
@@ -173,6 +232,17 @@ def build_chapter_title(
         )
         query_overlap_ratio = len(token_set.intersection(focus_words)) / max(len(token_set), 1)
         overlap_score += (1.0 - query_overlap_ratio) * 0.16
+        semantic_candidate_key = _semantic_key(candidate)
+        depth_info = depth_map.get(semantic_candidate_key)
+        if depth_info:
+            overlap_score += _semantic_layer_bonus(str(depth_info.get("layer", "")), target_layer)
+        overlap_score += semantic_bonus_by_key.get(semantic_candidate_key, 0.0)
+        if semantic_focus_key and semantic_candidate_key == semantic_focus_key:
+            overlap_score += 0.42
+        if token_set.issubset(focus_words) and len(token_set) <= 3:
+            overlap_score -= 0.52
+        if query_overlap_ratio >= 0.75 and len(token_set) <= 3:
+            overlap_score -= 0.24
 
         if compact_key == query_key:
             overlap_score -= 0.5
@@ -186,6 +256,10 @@ def build_chapter_title(
             overlap_score -= 0.22
         if query_overlap_ratio >= 0.5 and len(token_set) > max(2, len(focus_words)):
             overlap_score -= 0.18
+        if depth_info and depth_info.get("layer") == "seed" and target_layer == "tangential":
+            overlap_score -= 0.16
+        if depth_info and depth_info.get("layer") == "tangential" and target_layer == "seed":
+            overlap_score -= 0.10
 
         scored_candidates.append((overlap_score, compact))
 
@@ -198,6 +272,10 @@ def build_chapter_title(
         return _trim_title(f"{base_label}: {compact}")
 
     fallback_tail = CHAPTER_TITLE_FALLBACKS.get(base_label, "")
+    if semantic_title_focus:
+        semantic_tail = _compact_phrase(semantic_title_focus, tokenize=tokenize, stop_words=stop_words)
+        if semantic_tail and normalize_term_key(semantic_tail) not in {query_key, base_key}:
+            return _trim_title(f"{base_label}: {semantic_tail}")
     if topic_label and fallback_tail:
         return _trim_title(f"{base_label}: {topic_label} {fallback_tail}")
     if topic_label:

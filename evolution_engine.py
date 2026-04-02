@@ -5,6 +5,7 @@ import time
 import urllib.parse
 import re
 import contextlib
+from functools import lru_cache
 
 from engine.features import attach_selection_features
 from engine.fallback import (
@@ -21,6 +22,8 @@ from engine.ga import (
     mutate as ga_mutate,
     tournament_pick as ga_tournament_pick,
 )
+from engine.nlp import extract_subtopic_tree, semantic_similarity
+from engine.nlp_graph import concept_crawl_depth, expand_semantic_phrases, expand_semantic_terms
 from engine.archetypes import get_chapter_templates
 from engine.normalize import (
     dedupe_results as dedupe_results_impl,
@@ -102,9 +105,9 @@ CHAPTER_TEMPLATES = [
 
 DEFAULT_SOURCE_SELECTION = {
     "wikipedia": True,
-    "duckduckgo": True,
-    "google": True,
-    "bing": True,
+    "duckduckgo": False,
+    "google": False,
+    "bing": False,
 }
 
 USER_AGENTS = [
@@ -284,6 +287,57 @@ def expand_query_focus_words(q_words):
     for token in q_words:
         expanded.update(_generic_token_variants(token))
     return expanded
+
+
+@lru_cache(maxsize=256)
+def semantic_query_terms(query_signature):
+    terms = set(expand_semantic_terms(query_signature, max_depth=1, limit=24))
+    return {term for term in terms if term not in STOP_WORDS}
+
+
+def chapter_depth_target(chapter_index, chapter_count):
+    if chapter_count <= 1:
+        return "seed"
+    position = chapter_index / max(chapter_count - 1, 1)
+    if position <= 0.25:
+        return "seed"
+    if position <= 0.7:
+        return "related"
+    return "tangential"
+
+
+def build_semantic_title_path(query, semantic_topics, theme_candidates, chapter_count):
+    ordered_topics = sorted(
+        [topic for topic in semantic_topics if isinstance(topic, dict)],
+        key=lambda item: (float(item.get("divergence", 0.0)), float(item.get("score", 0.0))),
+        reverse=True,
+    )
+    candidate_phrases = unique_preserve_order(
+        [
+            topic.get("label", "")
+            for topic in ordered_topics
+        ] + list(theme_candidates) + expand_semantic_phrases(query, max_depth=2, limit=max(8, chapter_count))
+    )
+    candidate_phrases = [phrase for phrase in candidate_phrases if normalize_space(phrase)]
+    if not candidate_phrases:
+        return [query for _ in range(chapter_count)]
+
+    depth_groups = {"seed": [], "related": [], "tangential": []}
+    for item in concept_crawl_depth(query, candidate_phrases):
+        layer = item.get("layer", "related")
+        depth_groups.setdefault(layer, []).append(item.get("node", query))
+
+    path = []
+    for chapter_index in range(chapter_count):
+        target_layer = chapter_depth_target(chapter_index, chapter_count)
+        pool = (
+            depth_groups.get(target_layer)
+            or depth_groups.get("related")
+            or depth_groups.get("seed")
+            or candidate_phrases
+        )
+        path.append(pool[chapter_index % len(pool)])
+    return path
 
 
 def normalize_source_config(config):
@@ -534,6 +588,8 @@ def source_relevance(result, q_words):
     title = result.get("title", "").lower()
     content = result.get("content", "").lower()
     focus_words = expand_query_focus_words(q_words)
+    query_signature = " ".join(sorted(q_words))
+    semantic_focus_words = semantic_query_terms(query_signature)
     
     # Base overlap score
     result_text = title + " " + content
@@ -544,8 +600,26 @@ def source_relevance(result, q_words):
     # Weighted overlap: title words are worth more
     title_overlap = len(title_words.intersection(focus_words)) / max(len(focus_words), 1)
     content_overlap = len(content_words.intersection(focus_words)) / max(len(focus_words), 1)
-    
-    overlap = (title_overlap * 0.6) + (content_overlap * 0.4)
+    semantic_title_overlap = (
+        len(title_words.intersection(semantic_focus_words)) / max(len(semantic_focus_words), 1)
+        if semantic_focus_words else 0.0
+    )
+    semantic_content_overlap = (
+        len(content_words.intersection(semantic_focus_words)) / max(len(semantic_focus_words), 1)
+        if semantic_focus_words else 0.0
+    )
+    semantic_overlap = (semantic_title_overlap * 0.55) + (semantic_content_overlap * 0.45)
+    overlap = (title_overlap * 0.46) + (content_overlap * 0.30) + (semantic_overlap * 0.24)
+    latent_similarity = clamp(
+        float(
+            result.get(
+                "_semanticCentroidSimilarity",
+                result.get("_semanticQuerySimilarity", semantic_similarity(query_signature, result_text)),
+            )
+        ),
+        0.0,
+        1.0,
+    )
 
     filler_terms = {
         "best", "can", "considering", "could", "decade", "decades", "how", "most",
@@ -574,10 +648,10 @@ def source_relevance(result, q_words):
             )
             boost += (secondary_title_overlap * 0.18) + (secondary_content_overlap * 0.10)
 
-        if not soft_match(primary_anchor, result_words) and len(q_words) > 3 and overlap > 0.0:
+        if not soft_match(primary_anchor, result_words) and len(q_words) > 3 and overlap > 0.0 and latent_similarity < 0.28:
             boost -= 0.10
 
-    return clamp(overlap + boost, 0.0, 1.0)
+    return clamp(overlap + boost + (latent_similarity * 0.18), 0.0, 1.0)
 
 
 def marginal_gain(result, selected_results, q_words):
@@ -1021,6 +1095,38 @@ def generate_webbook(selected_sources, query):
         query,
         normalize_term_key=normalize_term_key,
     )
+    semantic_corpus = [
+        normalize_space(
+            " ".join(
+                part for part in (
+                    source.get("title", ""),
+                    source.get("content", ""),
+                    " ".join(
+                        f"{item.get('term', '')} {item.get('description', '')}"
+                        for item in (source.get("definitions", []) or [])
+                        if isinstance(item, dict)
+                    ),
+                    " ".join(
+                        f"{item.get('title', '')} {item.get('summary', '')}"
+                        for item in (source.get("subTopics", []) or [])
+                        if isinstance(item, dict)
+                    ),
+                ) if part
+            )
+        )
+        for source in normalized_sources[:12]
+    ]
+    semantic_subtopic_tree = extract_subtopic_tree(
+        query,
+        semantic_corpus,
+        max_topics=max(6, min(len(chapter_templates), 10)),
+    )
+    semantic_title_path = build_semantic_title_path(
+        query,
+        semantic_subtopic_tree,
+        theme_candidates,
+        len(chapter_templates),
+    )
     global_definitions = dedupe_definitions([
         definition
         for source in normalized_sources
@@ -1068,6 +1174,11 @@ def generate_webbook(selected_sources, query):
             selected_cluster.get("focus_phrase")
             or (theme_candidates[chapter_index % len(theme_candidates)] if theme_candidates else "")
         )
+        semantic_title_focus = (
+            semantic_title_path[chapter_index]
+            if chapter_index < len(semantic_title_path)
+            else ""
+        )
         chapter_title = build_chapter_title(
             base_label,
             query,
@@ -1077,6 +1188,10 @@ def generate_webbook(selected_sources, query):
             [],
             focus_words,
             template_keywords,
+            semantic_subtopic_tree=semantic_subtopic_tree,
+            semantic_title_focus=semantic_title_focus,
+            chapter_index=chapter_index,
+            chapter_count=len(chapter_templates),
             tokenize=tokenize,
             stop_words=STOP_WORDS,
             normalize_term_key=normalize_term_key,
@@ -1188,6 +1303,10 @@ def generate_webbook(selected_sources, query):
             chapter_subtopic_pool,
             focus_words,
             template_keywords,
+            semantic_subtopic_tree=semantic_subtopic_tree,
+            semantic_title_focus=semantic_title_focus,
+            chapter_index=chapter_index,
+            chapter_count=len(chapter_templates),
             tokenize=tokenize,
             stop_words=STOP_WORDS,
             normalize_term_key=normalize_term_key,

@@ -9,6 +9,7 @@ LONG_QUERY = (
     "high-value application domains, and how should enterprises and policymakers "
     "prioritize strategic bets, capability building, and risk mitigation in response?"
 )
+MALAYSIA_QUERY = "outlook for the malaysian stock market over the next one year"
 
 
 def build_population():
@@ -88,6 +89,107 @@ def build_population():
     ]
 
 
+def build_market_population():
+    return [
+        {
+            "title": "Bursa Malaysia outlook and sector rotation",
+            "url": "https://example.com/bursa",
+            "content": (
+                "Bursa Malaysia performance depends on sector rotation, earnings revisions, and domestic liquidity "
+                "conditions across banks, plantations, and technology exporters."
+            ),
+            "definitions": [
+                {
+                    "term": "Bursa Malaysia",
+                    "description": "Malaysia's main exchange for listed equities and market disclosure.",
+                    "sourceUrl": "https://example.com/bursa",
+                }
+            ],
+            "subTopics": [
+                {
+                    "title": "Sector Rotation",
+                    "summary": "How investors rebalance capital among Malaysian listed sectors.",
+                    "sourceUrl": "https://example.com/bursa",
+                }
+            ],
+            "informativeScore": 0.88,
+            "authorityScore": 0.82,
+        },
+        {
+            "title": "Foreign investment flows and Malaysia equities",
+            "url": "https://example.com/flows",
+            "content": (
+                "Foreign inflows and currency stability influence valuation multiples, capital formation, and "
+                "trading sentiment in Malaysia equities."
+            ),
+            "definitions": [
+                {
+                    "term": "Foreign Investment Flows",
+                    "description": "Cross-border capital movements shaping listed-company demand and pricing.",
+                    "sourceUrl": "https://example.com/flows",
+                }
+            ],
+            "subTopics": [
+                {
+                    "title": "Currency Stability",
+                    "summary": "How exchange-rate pressure affects foreign participation and valuation risk.",
+                    "sourceUrl": "https://example.com/flows",
+                }
+            ],
+            "informativeScore": 0.86,
+            "authorityScore": 0.8,
+        },
+        {
+            "title": "Commodity pricing and export-linked earnings",
+            "url": "https://example.com/commodities",
+            "content": (
+                "Commodity prices affect plantation producers, energy exporters, and industrial earnings that feed "
+                "into Malaysian equity-market expectations."
+            ),
+            "definitions": [
+                {
+                    "term": "Commodity Pricing",
+                    "description": "Market prices for energy, metals, and agricultural exports relevant to equities.",
+                    "sourceUrl": "https://example.com/commodities",
+                }
+            ],
+            "subTopics": [
+                {
+                    "title": "Export Earnings",
+                    "summary": "Profit sensitivity of listed firms to global demand and commodity cycles.",
+                    "sourceUrl": "https://example.com/commodities",
+                }
+            ],
+            "informativeScore": 0.85,
+            "authorityScore": 0.78,
+        },
+        {
+            "title": "Capital-market regulation and disclosure standards",
+            "url": "https://example.com/regulation",
+            "content": (
+                "Capital-market regulation, disclosure standards, and governance reforms influence investor "
+                "confidence, compliance costs, and listing quality in Malaysia."
+            ),
+            "definitions": [
+                {
+                    "term": "Capital-Market Regulation",
+                    "description": "Rules and governance standards that shape market access and transparency.",
+                    "sourceUrl": "https://example.com/regulation",
+                }
+            ],
+            "subTopics": [
+                {
+                    "title": "Disclosure Standards",
+                    "summary": "Reporting requirements that affect trust and valuation discipline.",
+                    "sourceUrl": "https://example.com/regulation",
+                }
+            ],
+            "informativeScore": 0.84,
+            "authorityScore": 0.81,
+        },
+    ]
+
+
 class WebBookTitleTests(unittest.TestCase):
     def test_long_query_is_not_repeated_verbatim_in_each_chapter_title(self):
         book = generate_webbook(build_population(), LONG_QUERY)
@@ -113,6 +215,17 @@ class WebBookTitleTests(unittest.TestCase):
         self.assertIn("ai", combined_titles)
         self.assertTrue(
             any(keyword in combined_titles for keyword in ("investment", "applications", "risk", "strategy", "governance"))
+        )
+
+    def test_market_titles_expand_beyond_repeating_stock_market_phrase(self):
+        book = generate_webbook(build_market_population(), MALAYSIA_QUERY)
+        titles = [chapter["title"].lower() for chapter in book["chapters"]]
+        repeated_phrase_count = sum("stock market" in title for title in titles)
+        combined_titles = " ".join(titles)
+
+        self.assertLessEqual(repeated_phrase_count, 4)
+        self.assertTrue(
+            any(term in combined_titles for term in ("bursa", "foreign", "commodity", "regulation", "capital"))
         )
 
 

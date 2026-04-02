@@ -1,5 +1,6 @@
 """Search orchestration helpers for the evolutionary engine."""
 
+from functools import lru_cache
 import html
 import json
 import re
@@ -9,6 +10,7 @@ from html.parser import HTMLParser
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from .features import build_quality_feature_snapshot
+from .nlp import semantic_cooccurrence_filter
 
 
 class MLStripper(HTMLParser):
@@ -234,43 +236,52 @@ def fetch_page_excerpt(
     ).get("content", "")
 
 
-def search_wikipedia(
+def _cached_normalize_space(text: Any) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+@lru_cache(maxsize=96)
+def _cached_wikipedia_lookup(
     query: str,
-    headers: Dict[str, str],
-    limit: int = 5,
-    *,
-    get_fallback_query: Callable[[str], str],
-    normalize_space: Callable[[Any], str],
-    strip_tags_fn: Callable[[str], str] = strip_tags,
+    limit: int,
+    fallback_query: str,
     search_request_timeout: int,
-    debug: Callable[[str], None],
-) -> List[Dict[str, Any]]:
+) -> tuple[dict[str, Any], ...]:
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+    }
     encoded_query = urllib.parse.quote(query)
-    search_url = f"https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={encoded_query}&utf8=&format=json&srlimit={limit}"
+    search_url = (
+        "https://en.wikipedia.org/w/api.php?action=query&list=search"
+        f"&srsearch={encoded_query}&utf8=&format=json&srlimit={limit}"
+    )
 
     try:
         request = urllib.request.Request(search_url, headers=headers)
         with urllib.request.urlopen(request, timeout=search_request_timeout) as response:
             data = json.loads(response.read().decode("utf-8"))
-    except Exception as error:
-        debug(f"Wikipedia initial search failed: {error}")
+    except Exception:
         data = {}
 
     search_results = data.get("query", {}).get("search", [])
 
-    if not search_results and len(query.split()) > 4:
-        fallback_query = get_fallback_query(query)
-        if fallback_query:
-            debug(f"Wikipedia retrying with focused query: {fallback_query}")
-            encoded_fallback = urllib.parse.quote(fallback_query)
-            fallback_url = f"https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={encoded_fallback}&utf8=&format=json&srlimit={limit}"
-            try:
-                fallback_request = urllib.request.Request(fallback_url, headers=headers)
-                with urllib.request.urlopen(fallback_request, timeout=search_request_timeout) as fallback_response:
-                    fallback_data = json.loads(fallback_response.read().decode("utf-8"))
-                    search_results = fallback_data.get("query", {}).get("search", [])
-            except Exception:
-                pass
+    if not search_results and fallback_query:
+        encoded_fallback = urllib.parse.quote(fallback_query)
+        fallback_url = (
+            "https://en.wikipedia.org/w/api.php?action=query&list=search"
+            f"&srsearch={encoded_fallback}&utf8=&format=json&srlimit={limit}"
+        )
+        try:
+            fallback_request = urllib.request.Request(fallback_url, headers=headers)
+            with urllib.request.urlopen(fallback_request, timeout=search_request_timeout) as fallback_response:
+                fallback_data = json.loads(fallback_response.read().decode("utf-8"))
+                search_results = fallback_data.get("query", {}).get("search", [])
+        except Exception:
+            search_results = []
 
     page_ids = [str(item.get("pageid")) for item in search_results if item.get("pageid")]
     page_extracts: Dict[str, str] = {}
@@ -286,7 +297,7 @@ def search_wikipedia(
                 extract_data = json.loads(extract_response.read().decode("utf-8"))
                 pages = extract_data.get("query", {}).get("pages", {})
                 page_extracts = {
-                    page_id: normalize_space(page_info.get("extract", ""))
+                    page_id: _cached_normalize_space(page_info.get("extract", ""))
                     for page_id, page_info in pages.items()
                 }
         except Exception:
@@ -294,9 +305,9 @@ def search_wikipedia(
 
     results = []
     for item in search_results:
-        title = normalize_space(item.get("title", ""))
+        title = _cached_normalize_space(item.get("title", ""))
         page_id = item.get("pageid")
-        snippet = normalize_space(strip_tags_fn(item.get("snippet", "")))
+        snippet = _cached_normalize_space(strip_tags(item.get("snippet", "")))
         content = page_extracts.get(str(page_id), snippet)
 
         if not content or len(content) < 50:
@@ -309,7 +320,50 @@ def search_wikipedia(
             "searchProvider": "wikipedia",
         })
 
-    return results
+    return tuple(results)
+
+
+def search_wikipedia(
+    query: str,
+    headers: Dict[str, str],
+    limit: int = 5,
+    *,
+    get_fallback_query: Callable[[str], str],
+    normalize_space: Callable[[Any], str],
+    strip_tags_fn: Callable[[str], str] = strip_tags,
+    search_request_timeout: int,
+    debug: Callable[[str], None],
+) -> List[Dict[str, Any]]:
+    fallback_query = get_fallback_query(query) if len(query.split()) > 4 else ""
+    try:
+        cached_results = _cached_wikipedia_lookup(
+            query,
+            limit,
+            fallback_query,
+            search_request_timeout,
+        )
+    except Exception as error:
+        debug(f"Wikipedia initial search failed: {error}")
+        return []
+
+    results = []
+    for item in cached_results:
+        result = dict(item)
+        result["title"] = normalize_space(result.get("title", ""))
+        result["content"] = normalize_space(result.get("content", ""))
+        results.append(result)
+
+    filtered_results = semantic_cooccurrence_filter(
+        query,
+        results,
+        baseline_documents=results[:2],
+        min_similarity=0.18,
+        keep_min=1 if len(results) <= 2 else 2,
+    )
+    if filtered_results and len(filtered_results) < len(results):
+        debug(f"Wikipedia semantic filter retained {len(filtered_results)} of {len(results)} results")
+
+    return filtered_results[:limit] if filtered_results else results[:limit]
 
 
 def search_duckduckgo(
@@ -887,6 +941,28 @@ def search_web_results(
 
     combined_results = interleave_result_lists(*provider_results, *focused_provider_results)
     normalized_results = list(dedupe_results(combined_results, query))
+    if normalized_results:
+        wikipedia_baseline = [
+            result
+            for result in normalized_results
+            if str(result.get("searchProvider", "")).lower() == "wikipedia"
+            or "wikipedia" in [str(provider).lower() for provider in (result.get("searchProviders", []) or [])]
+        ]
+        filtered_results = semantic_cooccurrence_filter(
+            query,
+            normalized_results,
+            baseline_documents=wikipedia_baseline[:4] or normalized_results[:2],
+            min_similarity=0.16 if wikipedia_baseline else 0.12,
+            keep_min=min(3, max(1, len(normalized_results) // 4)),
+        )
+        if filtered_results:
+            if len(filtered_results) < len(normalized_results):
+                debug(
+                    "Semantic co-occurrence filter retained "
+                    f"{len(filtered_results)} of {len(normalized_results)} frontier results"
+                )
+            normalized_results = filtered_results
+
     ranked_results = rank_frontier_results(
         normalized_results,
         query,
