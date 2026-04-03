@@ -189,12 +189,21 @@ def fetch_page_document(
         return {"title": title_from_url(url), "content": ""}
 
     charset_match = re.search(r"charset=([A-Za-z0-9._-]+)", content_type, re.IGNORECASE)
-    encoding = charset_match.group(1) if charset_match else "utf-8"
+    declared_encoding = charset_match.group(1) if charset_match else "utf-8"
 
-    try:
-        decoded = raw_body.decode(encoding, errors="ignore")
-    except Exception:
-        decoded = raw_body.decode("utf-8", errors="ignore")
+    # Try the declared encoding first (strict), fall back to UTF-8 (strict),
+    # then latin-1 (never raises), to avoid silently discarding bytes.
+    decoded = None
+    for enc in (declared_encoding, "utf-8", "latin-1"):
+        try:
+            decoded = raw_body.decode(enc, errors="strict")
+            break
+        except (UnicodeDecodeError, LookupError):
+            continue
+    if decoded is None:
+        decoded = raw_body.decode("utf-8", errors="replace")
+    # Scrub any Unicode replacement characters left by errors="replace".
+    decoded = decoded.replace("\ufffd", " ")
 
     if "html" in content_type.lower() or "<html" in decoded.lower():
         page_title = extract_html_title(decoded, normalize_space=normalize_space)
@@ -236,8 +245,22 @@ def fetch_page_excerpt(
     ).get("content", "")
 
 
+import unicodedata as _unicodedata
+
+_SEARCH_CHAR_MAP = str.maketrans({
+    '\xa0': ' ', '\u00ad': '', '\u200b': '', '\u200c': '', '\u200d': '',
+    '\ufeff': '', '\u2018': "'", '\u2019': "'", '\u201a': "'", '\u201b': "'",
+    '\u201c': '"', '\u201d': '"', '\u201e': '"', '\u2013': '-', '\u2014': '-',
+    '\u2015': '-', '\u2026': '...', '\u2022': '-', '\u00b7': '-',
+    '\u2039': '<', '\u203a': '>', '\u00ab': '"', '\u00bb': '"',
+})
+
+
 def _cached_normalize_space(text: Any) -> str:
-    return re.sub(r"\s+", " ", str(text or "")).strip()
+    text = str(text or "")
+    text = _unicodedata.normalize("NFKC", text)
+    text = text.translate(_SEARCH_CHAR_MAP)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 @lru_cache(maxsize=96)
@@ -366,6 +389,27 @@ def search_wikipedia(
     return filtered_results[:limit] if filtered_results else results[:limit]
 
 
+def _decode_html_bytes(raw: bytes, hints: str = "") -> str:
+    """Decode raw HTTP bytes to str using a charset-priority fallback chain.
+
+    1. Charset declared in *hints* (the Content-Type header value), if any.
+    2. UTF-8 (strict) - most modern pages.
+    3. latin-1 - never raises; covers Windows-1252 and ISO-8859-1 pages.
+    4. UTF-8 with errors='replace' as a last resort; replacement chars (\ufffd)
+       are stripped afterwards to avoid them surfacing in content.
+    """
+    declared: list[str] = []
+    m = re.search(r"charset=([A-Za-z0-9._-]+)", hints, re.IGNORECASE)
+    if m:
+        declared = [m.group(1)]
+    for enc in (*declared, "utf-8", "latin-1"):
+        try:
+            return raw.decode(enc, errors="strict")
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return raw.decode("utf-8", errors="replace").replace("\ufffd", " ")
+
+
 def search_duckduckgo(
     query: str,
     headers: Dict[str, str],
@@ -382,7 +426,7 @@ def search_duckduckgo(
     request = urllib.request.Request(search_url, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=search_request_timeout) as response:
-            raw_html = response.read().decode("utf-8", errors="ignore")
+            raw_html = _decode_html_bytes(response.read(), response.headers.get("Content-Type", ""))
             if any(keyword in raw_html.lower() for keyword in ("captcha", "robot", "security check", "automated access")):
                 debug("DuckDuckGo detected bot/captcha")
     except Exception as error:
@@ -442,7 +486,7 @@ def search_bing(
     request = urllib.request.Request(search_url, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=search_request_timeout) as response:
-            raw_html = response.read().decode("utf-8", errors="ignore")
+            raw_html = _decode_html_bytes(response.read(), response.headers.get("Content-Type", ""))
             if any(keyword in raw_html.lower() for keyword in ("captcha", "robot", "security check", "automated access")):
                 debug("Bing detected bot/captcha")
     except Exception as error:
@@ -500,7 +544,7 @@ def search_google(
     request = urllib.request.Request(search_url, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=search_request_timeout) as response:
-            raw_html = response.read().decode("utf-8", errors="ignore")
+            raw_html = _decode_html_bytes(response.read(), response.headers.get("Content-Type", ""))
             if any(keyword in raw_html.lower() for keyword in ("captcha", "robot", "security check", "automated access")):
                 debug("Google detected bot/captcha")
     except Exception as error:

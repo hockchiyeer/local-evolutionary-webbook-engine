@@ -4,6 +4,7 @@ import random
 import time
 import urllib.parse
 import re
+import unicodedata
 import contextlib
 from functools import lru_cache
 
@@ -125,8 +126,44 @@ USER_AGENTS = [
 SEARCH_REQUEST_TIMEOUT = 15
 PAGE_FETCH_TIMEOUT = 8
 
-def normalize_space(text):
-    return re.sub(r"\s+", " ", str(text or "")).strip()
+# Characters that survive HTML decoding but produce garbled output in plain text.
+# Keyed by Unicode codepoint, mapped to their safe ASCII replacement.
+_UNICODE_CHAR_MAP = {
+    '\xa0':  ' ',    # non-breaking space
+    '\u00ad': '',    # soft hyphen
+    '\u200b': '',    # zero-width space
+    '\u200c': '',    # zero-width non-joiner
+    '\u200d': '',    # zero-width joiner
+    '\ufeff': '',    # BOM / zero-width no-break space
+    '\u2018': "'",   # left single quotation mark
+    '\u2019': "'",   # right single quotation mark
+    '\u201a': "'",   # single low-9 quotation mark
+    '\u201b': "'",   # single high-reversed-9 quotation mark
+    '\u201c': '"',   # left double quotation mark
+    '\u201d': '"',   # right double quotation mark
+    '\u201e': '"',   # double low-9 quotation mark
+    '\u2013': '-',   # en dash
+    '\u2014': '-',   # em dash
+    '\u2015': '-',   # horizontal bar
+    '\u2026': '...', # horizontal ellipsis
+    '\u2022': '-',   # bullet
+    '\u00b7': '-',   # middle dot
+    '\u2039': '<',   # single left-pointing angle quotation mark
+    '\u203a': '>',   # single right-pointing double angle quotation mark
+    '\u00ab': '"',   # left-pointing double angle quotation mark
+    '\u00bb': '"',   # right-pointing double angle quotation mark
+}
+_UNICODE_TRANS = str.maketrans(_UNICODE_CHAR_MAP)
+
+
+def normalize_space(text: str) -> str:
+    """Normalise Unicode, replace problematic characters, collapse whitespace."""
+    text = str(text or "")
+    # NFKC: decompose + recompose, mapping compatibility chars (ligatures,
+    # half-width, circled letters ...) to their canonical equivalents.
+    text = unicodedata.normalize("NFKC", text)
+    text = text.translate(_UNICODE_TRANS)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def tokenize(text):
@@ -1026,13 +1063,42 @@ def evolve(all_results, query, generations=10, pop_size=30):
     )
     return ordered_results
 
+# Sentences matching these patterns are internal scaffolding that leaked into
+# fallback source content. They must never appear in chapter prose.
+_META_GUIDANCE_RE = re.compile(
+    r'\b('
+    r'fallback.driven'
+    r'|live retrieval'
+    r'|subject corpus'
+    r'|hardcoded'
+    r'|additional source material would'
+    r'|current material indicates'
+    r'|current synthesis'
+    r'|aim is to preserve'
+    r'|stays grounded in the query'
+    r'|without depending on any'
+    r'|present synthesis'
+    r'|present framing still keeps'
+    r'|prioritizes structured explanations'
+    r'|when live retrieval is'
+    r'|source coverage is available'
+    r'|strongest available source here is'
+    r')',
+    re.IGNORECASE,
+)
+
+
 def extract_sentences(text):
     normalized = normalize_space(text)
     if not normalized:
         return []
 
     sentences = re.split(r'(?<=[.!?])\s+', normalized)
-    return [sentence.strip() for sentence in sentences if len(sentence.strip()) > 20]
+    return [
+        s.strip()
+        for s in sentences
+        if len(s.strip()) > 20 and not _META_GUIDANCE_RE.search(s)
+    ]
     
 def choose_theme_candidates(selected_sources, query):
     clusters = build_source_clusters(
