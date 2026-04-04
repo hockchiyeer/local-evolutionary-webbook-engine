@@ -224,9 +224,13 @@ def build_source_feature_snapshot(
 
     if provider == "wikipedia":
         provider_bonus = 0.08
+    elif provider == "crossref":
+        provider_bonus = 0.07
+    elif provider == "openlibrary":
+        provider_bonus = 0.06
     elif provider == "manual":
         provider_bonus = 0.04
-    elif provider in {"google", "bing"}:
+    elif provider in {"google", "bing", "duckduckgo"}:
         provider_bonus = 0.02
 
     snapshot = {

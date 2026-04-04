@@ -1,5 +1,6 @@
 import sys
 import json
+import os
 import random
 import time
 import urllib.parse
@@ -49,8 +50,10 @@ from engine.search import (
     normalize_http_url as normalize_http_url_impl,
     run_provider_searches,
     search_bing as search_bing_impl,
+    search_crossref as search_crossref_impl,
     search_duckduckgo as search_duckduckgo_impl,
     search_google as search_google_impl,
+    search_openlibrary as search_openlibrary_impl,
     search_wikipedia as search_wikipedia_impl,
     search_web_results,
 )
@@ -108,9 +111,11 @@ CHAPTER_TEMPLATES = [
 
 DEFAULT_SOURCE_SELECTION = {
     "wikipedia": True,
-    "duckduckgo": False,
-    "google": False,
-    "bing": False,
+    "openlibrary": False,
+    "crossref": False,
+    "duckduckgo": True,
+    "google": True,
+    "bing": True,
 }
 
 USER_AGENTS = [
@@ -122,8 +127,9 @@ USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Edge/122.0.0.0',
 ]
 
-SEARCH_REQUEST_TIMEOUT = 15
-PAGE_FETCH_TIMEOUT = 8
+SEARCH_REQUEST_TIMEOUT = 20
+PAGE_FETCH_TIMEOUT = 12
+CROSSREF_CONTACT_EMAIL = os.environ.get("WEBBOOK_CONTACT_EMAIL", "").strip()
 
 # Characters that survive HTML decoding but produce garbled output in plain text.
 # Keyed by Unicode codepoint, mapped to their safe ASCII replacement.
@@ -792,6 +798,29 @@ def search_wikipedia(query, headers, limit=5):
     )
 
 
+def search_openlibrary(query, headers, limit=5):
+    return search_openlibrary_impl(
+        query,
+        headers,
+        limit,
+        normalize_space=normalize_space,
+        search_request_timeout=SEARCH_REQUEST_TIMEOUT,
+        debug=lambda message: print(f"DEBUG: {message}", file=sys.stderr),
+    )
+
+
+def search_crossref(query, headers, limit=5):
+    return search_crossref_impl(
+        query,
+        headers,
+        limit,
+        normalize_space=normalize_space,
+        search_request_timeout=SEARCH_REQUEST_TIMEOUT,
+        debug=lambda message: print(f"DEBUG: {message}", file=sys.stderr),
+        contact_email=CROSSREF_CONTACT_EMAIL,
+    )
+
+
 def search_duckduckgo(query, headers, limit=5):
     return search_duckduckgo_impl(
         query,
@@ -869,6 +898,8 @@ def search_web(query, source_config=None):
             source_selection,
             headers=headers,
             search_wikipedia_fn=search_wikipedia,
+            search_openlibrary_fn=search_openlibrary,
+            search_crossref_fn=search_crossref,
             search_duckduckgo_fn=search_duckduckgo,
             search_google_fn=search_google,
             search_bing_fn=search_bing,
@@ -902,6 +933,7 @@ def search_web(query, source_config=None):
             build_subtopic_candidates=build_subtopic_candidates,
         ),
         choose_user_agent=lambda: random.choice(USER_AGENTS),
+        fetch_page_document=fetch_page_document,
         debug=lambda message: print(f"DEBUG: {message}", file=sys.stderr),
     )
 

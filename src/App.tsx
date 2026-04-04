@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useWebBookEngine } from './hooks/useWebBookEngine';
 import { ControlSidebar } from './components/ControlSidebar';
 import { AppHeader } from './components/AppHeader';
@@ -11,7 +11,7 @@ import { HistoryDrawer } from './components/HistoryDrawer';
 import { WebBookViewer } from './components/WebBookViewer';
 import { exportWebBookToPdf, printWebBook, exportWebBookToWord, exportWebBookToHtml, exportWebBookToTxt } from './services/exportService';
 import { motion, AnimatePresence } from 'motion/react';
-import { Infinity as InfinityIcon } from 'lucide-react';
+import { Cpu, Dna, Search } from 'lucide-react';
 
 export default function App() {
   const [showHistory, setShowHistory] = useState(false);
@@ -19,6 +19,26 @@ export default function App() {
   const [isExporting, setIsExporting] = useState(false);
 
   const engine = useWebBookEngine();
+  const runtimeMs = engine.artifacts.startedAt ? (engine.artifacts.updatedAt ?? Date.now()) - engine.artifacts.startedAt : null;
+  const completedProviders = engine.artifacts.providerStatuses.filter((status) => status.status === 'complete' || status.status === 'error').length;
+  const totalProviders = engine.artifacts.providerStatuses.length;
+  const frontierCount = engine.artifacts.searchResults.length;
+  const evolvedCount = engine.artifacts.evolvedPopulation.length;
+  const showRightPaneIntro = !engine.webBook && engine.state.status === 'idle';
+  const activeStage = engine.state.status === 'searching'
+    ? {
+        eyebrow: 'Source Discovery',
+        detail: 'The engine is gathering public-web, book, and scholarly evidence before it ranks the frontier.',
+      }
+    : engine.state.status === 'evolving'
+      ? {
+          eyebrow: 'Evolutionary Selection',
+          detail: 'The local GA is scoring candidate sources, penalizing redundancy, and selecting the strongest evidence mix.',
+        }
+      : {
+          eyebrow: 'NLP Book Assembly',
+          detail: 'The engine is clustering themes, shaping chapter arcs, and running sentence-level selection for the book draft.',
+        };
 
   const handleExportPdf = async () => {
     if (!engine.webBook) return;
@@ -103,6 +123,7 @@ export default function App() {
           state={engine.state}
           error={engine.error}
           notice={engine.notice}
+          artifacts={engine.artifacts}
           showArtifacts={showArtifacts}
           onToggleArtifacts={() => setShowArtifacts(!showArtifacts)}
           onSearch={engine.runSearch}
@@ -118,6 +139,41 @@ export default function App() {
         />
 
         <div className="lg:col-span-8 space-y-8 flex flex-col min-h-[60vh] relative w-full overflow-hidden print:overflow-visible">
+          {showRightPaneIntro && (
+            <motion.section
+              key="right-pane-intro"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="print:hidden rounded-[30px] border border-[#1d1710] bg-[linear-gradient(180deg,#fffef8_0%,#f2e6d5_100%)] p-6 shadow-[0_24px_60px_-36px_rgba(34,24,12,0.45)] md:p-8"
+            >
+              <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-[#7b6e5d]">WebBook Studio</p>
+              <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div className="min-w-0">
+                  <h2 className="font-serif text-[2.2rem] leading-none text-[#1d1710] md:text-[3rem]">
+                    Tune the next reading run
+                  </h2>
+                  <p className="mt-4 max-w-2xl text-sm leading-7 text-[#5d5245] md:text-base">
+                    Blend public sources, domain-specific metadata, and local evolutionary synthesis into a stronger reading report.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-left sm:grid-cols-3">
+                  <div className="rounded-[18px] border border-[#d8ccbd] bg-[#fffdf8] px-4 py-3">
+                    <div className="text-[10px] uppercase tracking-[0.22em] text-[#8a7b67]">Sources</div>
+                    <div className="mt-2 text-lg font-semibold text-[#1d1710]">{Object.values(engine.sourceConfig.sources).filter(Boolean).length + engine.sourceConfig.manualUrls.length}</div>
+                  </div>
+                  <div className="rounded-[18px] border border-[#d8ccbd] bg-[#fffdf8] px-4 py-3">
+                    <div className="text-[10px] uppercase tracking-[0.22em] text-[#8a7b67]">Mode</div>
+                    <div className="mt-2 text-lg font-semibold leading-tight text-[#1d1710]">{engine.sourceConfig.executionMode === 'parallel' ? 'Parallel' : 'Sequential'}</div>
+                  </div>
+                  <div className="col-span-2 rounded-[18px] border border-[#d8ccbd] bg-[#fffdf8] px-4 py-3 sm:col-span-1">
+                    <div className="text-[10px] uppercase tracking-[0.22em] text-[#8a7b67]">Pipeline</div>
+                    <div className="mt-2 text-lg font-semibold leading-tight text-[#1d1710]">Ready to launch</div>
+                  </div>
+                </div>
+              </div>
+            </motion.section>
+          )}
+
           <AnimatePresence mode="popLayout">
             {engine.webBook ? (
               <motion.div
@@ -148,105 +204,79 @@ export default function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                className="print:hidden flex flex-col items-center justify-center flex-1 w-full bg-white border border-[#141414] shadow-[12px_12px_0px_0px_rgba(20,20,20,0.12)] p-12 min-h-[600px] mb-8"
+                className="print:hidden flex flex-col justify-center flex-1 w-full rounded-[34px] border border-[#1d1710] bg-[linear-gradient(180deg,#fffef8_0%,#efe4d2_100%)] p-8 md:p-12 min-h-[620px] mb-8 shadow-[0_28px_80px_-44px_rgba(34,24,12,0.5)]"
               >
-                <div className="flex flex-col items-center justify-center max-w-2xl mx-auto w-full text-center">
-                  <div className="relative w-24 h-24 mb-10 mx-auto">
-                    <div className="absolute inset-0 border-2 border-[#141414] rounded-full border-t-transparent animate-spin opacity-60" style={{ animationDuration: '2s' }} />
-                    <div className="absolute inset-2 border-2 border-[#141414] rounded-full border-b-transparent animate-spin" style={{ animationDirection: 'reverse', animationDuration: '3s', opacity: 0.8 }} />
-                    <div className="absolute inset-0 flex items-center justify-center text-[#141414]">
-                      <InfinityIcon size={28} strokeWidth={1.5} className="opacity-40 animate-pulse" />
-                    </div>
+                <div className="mx-auto flex w-full max-w-3xl flex-col justify-center text-center">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.34em] text-[#7b6e5d]">
+                    {activeStage.eyebrow}
                   </div>
-                  
-                  <h2 className="text-2xl md:text-3xl font-serif italic text-[#141414] mb-6 tracking-widest break-words w-full">
-                    EVOLVING KNOWLEDGE STRUCTURE
+                  <h2 className="mt-4 font-serif text-[2.6rem] leading-none text-[#1d1710]">
+                    Building the next WebBook
                   </h2>
-                  <p className="text-xs uppercase font-mono tracking-widest leading-loose text-[#141414]/50 mb-12 max-w-lg mx-auto">
-                    The engine is currently mining concepts, calculating Jaccard fitness, running Micro-GA crossovers, and mutating sentence sequences...
+                  <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-[#5d5245]">
+                    {activeStage.detail}
                   </p>
 
-                  <div className="flex justify-center gap-16 md:gap-24 w-full max-w-sm mx-auto mb-16">
-                    {/* Generation Ring Tracker */}
-                    <div className="flex flex-col items-center gap-4">
-                      <div className="relative w-20 h-20 flex items-center justify-center">
-                        <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100">
-                          <circle cx="50" cy="50" r="46" stroke="#141414" strokeWidth="1.5" fill="none" opacity="0.1" />
-                          <circle cx="50" cy="50" r="46" stroke="#141414" strokeWidth="2" strokeDasharray="4 6" fill="none" opacity="0.5" className="animate-spin" style={{ animationDuration: '10s' }} />
-                        </svg>
-                        <div className="absolute flex items-center justify-center">
-                          <span className="text-4xl font-light tabular-nums tracking-tighter text-[#141414]">
-                            {engine.state.generation || 0}
-                          </span>
+                  <div className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-4">
+                    <div className="rounded-[22px] border border-[#d8ccbd] bg-[#fffdf8] p-4 text-left">
+                      <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Sources Resolved</div>
+                      <div className="mt-2 text-2xl font-semibold text-[#1d1710]">{totalProviders ? `${completedProviders}/${totalProviders}` : '0'}</div>
+                    </div>
+                    <div className="rounded-[22px] border border-[#d8ccbd] bg-[#fffdf8] p-4 text-left">
+                      <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Frontier</div>
+                      <div className="mt-2 text-2xl font-semibold text-[#1d1710]">{frontierCount}</div>
+                    </div>
+                    <div className="rounded-[22px] border border-[#d8ccbd] bg-[#fffdf8] p-4 text-left">
+                      <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Evolved</div>
+                      <div className="mt-2 text-2xl font-semibold text-[#1d1710]">{evolvedCount || engine.state.population.length}</div>
+                    </div>
+                    <div className="rounded-[22px] border border-[#d8ccbd] bg-[#fffdf8] p-4 text-left">
+                      <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Elapsed</div>
+                      <div className="mt-2 text-2xl font-semibold text-[#1d1710]">{runtimeMs ? `${Math.max(1, Math.round(runtimeMs / 1000))}s` : '0s'}</div>
+                    </div>
+                  </div>
+
+                  <div className="mt-8 grid gap-3 md:grid-cols-3">
+                    {[
+                      {
+                        label: 'Source Discovery',
+                        active: engine.state.status === 'searching',
+                        complete: engine.state.status !== 'idle' && engine.state.status !== 'searching',
+                        icon: Search,
+                      },
+                      {
+                        label: 'Evolutionary Selection',
+                        active: engine.state.status === 'evolving',
+                        complete: engine.state.status === 'assembling' || engine.state.status === 'complete',
+                        icon: Dna,
+                      },
+                      {
+                        label: 'NLP Book Assembly',
+                        active: engine.state.status === 'assembling',
+                        complete: engine.state.status === 'complete',
+                        icon: Cpu,
+                      },
+                    ].map((stage) => {
+                      const Icon = stage.icon;
+                      return (
+                        <div
+                          key={stage.label}
+                          className={`rounded-[22px] border p-4 text-left ${
+                            stage.active
+                              ? 'border-[#1d1710] bg-[#1d1710] text-[#fffaf2]'
+                              : stage.complete
+                                ? 'border-[#245c39] bg-[#eef8f0] text-[#1f4f31]'
+                                : 'border-[#d8ccbd] bg-[#fffdf8] text-[#6b5b4a]'
+                          }`}
+                        >
+                          <div className="inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.22em]">
+                            <Icon size={12} />
+                            {stage.label}
+                          </div>
                         </div>
-                      </div>
-                      <span className="text-[9px] font-bold tracking-[0.25em] uppercase text-[#141414]/50">Generation</span>
-                    </div>
-
-                    {/* Target Pop Dotted Orbit */}
-                    <div className="flex flex-col items-center gap-4">
-                      <div className="relative w-20 h-20 flex items-center justify-center">
-                        <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100">
-                          <circle cx="50" cy="50" r="46" stroke="#141414" strokeWidth="1.5" fill="none" opacity="0.1" />
-                          <circle cx="50" cy="50" r="46" stroke="#141414" strokeWidth="2" strokeDasharray="4 6" fill="none" opacity="0.5" className="animate-spin" style={{ animationDuration: '10s' }} />
-                        </svg>
-                        <div className="absolute flex items-center justify-center">
-                          <span className="text-4xl font-light tabular-nums tracking-tighter text-[#141414]">
-                            {engine.state.population?.length || 0}
-                          </span>
-                        </div>
-                      </div>
-                      <span className="text-[9px] font-bold tracking-[0.25em] uppercase text-[#141414]/50">Target Pop.</span>
-                    </div>
+                      );
+                    })}
                   </div>
-
-                  <div className="w-full max-w-xl mx-auto border-t border-b border-[#141414]/10 py-12 relative overflow-hidden">
-                    <div className="absolute top-1/2 left-0 right-0 h-[1px] bg-[#141414]/20 -translate-y-1/2 z-0" />
-                    <div className="relative z-10 flex justify-between items-center px-2 md:px-8">
-                      <div className="flex flex-col items-center gap-5 bg-white px-4">
-                        <div className={`w-3.5 h-3.5 rounded-full border-2 ${
-                          engine.state.status === 'searching' ? 'border-blue-500 bg-blue-100 animate-pulse scale-150' : 'border-[#141414] bg-[#141414]'
-                        }`} style={{ transition: 'all 0.5s ease' }} />
-                        <span className={`text-[10px] font-bold tracking-[0.2em] uppercase ${
-                          engine.state.status === 'searching' ? 'text-blue-600' : 'text-[#141414]'
-                        }`}>Crawling</span>
-                      </div>
-                      <div className="flex flex-col items-center gap-5 bg-white px-4">
-                        <div className={`w-3.5 h-3.5 rounded-full border-2 ${
-                          (engine.state.status === 'assembling' || engine.state.status === 'complete') ? 'border-[#141414] bg-[#141414]' :
-                          engine.state.status === 'evolving' ? 'border-purple-500 bg-purple-100 animate-pulse scale-150' : 'border-[#141414]/30 bg-white'
-                        }`} style={{ transition: 'all 0.5s ease' }} />
-                        <span className={`text-[10px] font-bold tracking-[0.2em] uppercase ${
-                          (engine.state.status === 'assembling' || engine.state.status === 'complete') ? 'text-[#141414]' :
-                          engine.state.status === 'evolving' ? 'text-purple-600' : 'text-[#141414]/40'
-                        }`}>Source Evolution</span>
-                      </div>
-                      <div className="flex flex-col items-center gap-5 bg-white px-4">
-                        <div className={`w-3.5 h-3.5 rounded-full border-2 ${
-                          engine.state.status === 'assembling' ? 'border-green-500 bg-green-100 animate-pulse scale-150' : 'border-[#141414]/30 bg-white'
-                        }`} style={{ transition: 'all 0.5s ease' }} />
-                        <span className={`text-[10px] font-bold tracking-[0.2em] uppercase ${
-                          engine.state.status === 'assembling' ? 'text-green-600' : 'text-[#141414]/40'
-                        }`}>Sentence Micro-GA</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-16 pt-8 w-full border-t border-[#141414]/5 grid grid-cols-3 gap-4 justify-items-center opacity-80 bg-[#FAFAFA] p-6 rounded shadow-inner">
-                    <div className="flex flex-col items-center overflow-hidden w-full">
-                      <span className="text-[9px] font-bold text-blue-600 uppercase tracking-widest mb-2 truncate">Generation</span>
-                      <span className="text-2xl font-mono text-[#141414]">{engine.state.generation}</span>
-                    </div>
-                    <div className="flex flex-col items-center overflow-hidden w-full border-l border-r border-[#141414]/10">
-                      <span className="text-[9px] font-bold text-purple-600 uppercase tracking-widest mb-2 truncate">Pop. Size</span>
-                      <span className="text-2xl font-mono text-[#141414]">{engine.state.population?.length || 0}</span>
-                    </div>
-                    <div className="flex flex-col items-center overflow-hidden w-full">
-                      <span className="text-[9px] font-bold text-green-600 uppercase tracking-widest mb-2 truncate">Fitness (Fw)</span>
-                      <span className="text-2xl font-mono text-[#141414]">{(engine.state.bestFitness || 0).toFixed(4)}</span>
-                    </div>
-                  </div>
-
                 </div>
               </motion.div>
             )}

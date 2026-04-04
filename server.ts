@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -7,11 +8,11 @@ import cors from "cors";
 async function startServer() {
   const app = express();
   const PORT = 3000;
-  const MIN_REQUEST_TIMEOUT_MS = 180000;
-  const EXTENDED_REQUEST_TIMEOUT_MS = 300000;
+  const SEARCH_REQUEST_TIMEOUT_MS = 420000;
+  const EXTENDED_REQUEST_TIMEOUT_MS = 480000;
 
   app.use(cors());
-  app.use(express.json({ limit: "5mb" }));
+  app.use(express.json({ limit: "10mb" }));
   app.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (!error) {
       return next();
@@ -51,7 +52,7 @@ async function startServer() {
   function runPython(mode: string, query: string, data: any, res: any) {
     const args = ["evolution_engine.py", mode, query];
     const requestTimeoutMs = mode === "search"
-      ? MIN_REQUEST_TIMEOUT_MS
+      ? SEARCH_REQUEST_TIMEOUT_MS
       : EXTENDED_REQUEST_TIMEOUT_MS;
 
     let dataChunks: Buffer[] = [];

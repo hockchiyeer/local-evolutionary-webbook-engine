@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type SearchSourceKey = "wikipedia" | "duckduckgo" | "google" | "bing";
+export type SearchSourceKey = "wikipedia" | "openlibrary" | "crossref" | "duckduckgo" | "google" | "bing";
 export type SearchExecutionMode = "sequential" | "parallel";
 
 export interface SearchSourceConfig {

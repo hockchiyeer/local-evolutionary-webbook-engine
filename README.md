@@ -1,159 +1,85 @@
-# Multi Source Evolutionary Webbook Engine
+# Multi-Source Evolutionary WebBook Engine
 
-A commercial API-independent Web application that turns a queried topic into a structured "web-book" by combining a React frontend, an Express development server, and a local Python-based evolutionary synthesis engine.
+This repository generates a structured "WebBook" from a topic prompt without using paid commercial LLMs or commercial API dependencies.
 
-👉 You can explore the live application built from this repository’s source code at: [https://ai.studio/apps/e65be886-741c-4062-9a9c-9f589f240948?fullscreenApplet=true](https://ai.studio/apps/e65be886-741c-4062-9a9c-9f589f240948?fullscreenApplet=true)
+The stack combines:
 
-The project does not depend on commercial LLM APIs, cloud AI APIs, or hosted model providers. Its content pipeline is driven by a local evolutionary engine that searches public sources, scores relevance and redundancy, evolves a compact source set, and assembles a 10-chapter book-like reading experience. It now also includes an offline semantic layer backed by local open-source NLP tooling and a broad benchmark/regression harness for backend quality tracking.
+- a React + Vite frontend
+- an Express bridge server
+- a local Python evolutionary engine
+- public and free content sources
+- local NLP, ranking, and chapter-assembly logic
 
-## What This Repo Does
+The result is a multi-chapter reading experience built from live source intake, local source evolution, and local assembly.
 
-- Generates a multi-chapter web-book for a user-supplied topic.
-- Uses a local Python evolutionary engine instead of a commercial AI API.
-- Combines Wikipedia, DuckDuckGo, Google, and Bing source discovery by default, then falls back to adaptive local synthetic sources when external access is unavailable.
-- Scores sources by relevance, informativeness, authority, and redundancy.
-- Builds a styled reading interface with a cover, table of contents, chapter pages, glossary blocks, and chapter source references.
-- Provides a source portal so users can opt search providers in or out and add manual source URLs.
-- Persists generated books in browser `localStorage` for quick revisit through the history panel.
-- Supports export to PDF, Word-compatible HTML, standalone HTML, and plain text.
+## What It Does
 
-## Current Features
+- searches across multiple public and free sources
+- normalizes and deduplicates the source frontier
+- ranks sources with local relevance, authority, depth, and redundancy signals
+- evolves a tighter candidate set with a local genetic algorithm
+- assembles a 10-chapter WebBook with definitions, subtopics, and source citations
+- exposes the real pipeline stages and source telemetry in the portal UI
+- stores generated books in browser history
+- exports to PDF, Print / Save as PDF, Word-compatible HTML, HTML, and TXT
 
-- `Targeted ingestion`: topic-driven search across Wikipedia, DuckDuckGo, Google, and Bing with normalized source extraction.
-- `Source portal`: per-provider opt-in/opt-out controls plus manual URL entry for custom sources.
-- `Evolutionary processing`: redundancy-aware source selection with greedy seeding, crossover, mutation, and fitness scoring.
-- `Offline semantic analysis`: local semantic coherence and clustering signals using open-source `scikit-learn`, with no hosted inference dependency.
-- `Entity-aware fallback`: generic archetype-aware fallback and chapter shaping so person-name queries degrade into biography-style synthesis instead of abstract generic filler.
-- `Web-book assembly`: converts evolved sources into a 10-chapter book with chapter text, definitions, sub-topics, visual seeds, and source citations.
-- `Readable rendering`: filters noisy glossary/sub-topic content before display and computes render/page plans for the formatted book view.
-- `Export options`: PDF, `.doc`, `.html`, and `.txt`.
-- `History archive`: local browser history with per-book reopen and delete support.
-- `Defensive error handling`: better handling for non-JSON backend errors and Python process startup failures.
-- `Benchmark and regression coverage`: backend contract tests, pipeline regressions, GA operator tests, organization regression checks, and a broad synthetic benchmark library with tag-based packs.
+## Free/Public Source Mix
+
+The engine can ingest from:
+
+- `Wikipedia`
+- `Open Library`
+- `Crossref`
+- `DuckDuckGo`
+- `Google`
+- `Bing`
+- user-supplied manual URLs
+- adaptive local fallback synthesis when live retrieval is insufficient
+
+Notes:
+
+- `Open Library` is used for book, author, and subject metadata.
+- `Crossref` is used for scholarly metadata and abstracts when available.
+- `Google` and `Bing` are best-effort HTML retrieval paths and may return fewer results depending on network conditions.
+- `Crossref` can optionally receive a polite contact email through `WEBBOOK_CONTACT_EMAIL`.
+
+## Current Quality Strategy
+
+The repo now aims to reduce "mechanical template-like" output by widening the source frontier and improving evidence quality before assembly:
+
+- direct page-excerpt enrichment is applied to shallow public-web hits
+- repeated SERP phrasing is cleaned before ranking
+- `Open Library` adds book-oriented context
+- `Crossref` adds research-oriented context
+- result caps and time budgets are increased so the engine can work with a broader frontier
+- the UI now maps real engine stages and source-provider progress instead of showing decorative progress only
+
+## Pipeline
+
+The core runtime flow is:
+
+1. `Source discovery`
+   Pulls from enabled providers, manual URLs, and free metadata sources.
+2. `Frontier cleanup`
+   Normalizes, deduplicates, semantically filters, and enriches weak hits.
+3. `Evolutionary selection`
+   Applies local feature scoring, redundancy penalties, crossover, mutation, and ranked source selection.
+4. `Book assembly`
+   Builds chapter clusters, semantic title paths, sentence-level micro-GA selection, and final chapter structure.
+
+## UI Mapping
+
+The portal UI now exposes the real runtime model:
+
+- per-source intake tiles with live status, batch result counts, and elapsed time
+- a stage atlas for `Source Discovery`, `Evolutionary Selection`, and `NLP Book Assembly`
+- live frontier, evolved-population, and chapter counts
+- an artifacts drawer showing:
+  - search frontier items
+  - ranked/evolved source candidates
+  - chapter blueprint output
 
 ## Architecture
-
-The app is split into three layers:
-
-1. `React + Vite frontend`
-   Renders the UI, collects the topic, displays the generated web-book, and manages exports/history.
-2. `Express bridge server`
-   Hosts the Vite app in development and exposes `/api/search`, `/api/evolve`, and `/api/assemble`.
-3. `Python evolutionary engine`
-   Performs source retrieval, normalization, feature extraction, fitness scoring, source evolution, semantic clustering, benchmarking, and chapter assembly.
-
-Request flow:
-
-1. The browser submits a topic.
-2. `src/services/evolutionService.ts` calls the local Express API.
-3. `server.ts` starts `evolution_engine.py` and passes structured payloads through `stdin`.
-4. The Python engine returns JSON to the server.
-5. The frontend renders the generated web-book and enables export/history actions.
-
-## File And Folder Structure
-
-Key repo files and folders:
-
-```text
-.
-|-- engine/
-|   |-- archetypes.py
-|   |-- benchmarks.py
-|   |-- contracts.py
-|   |-- fallback.py
-|   |-- features.py
-|   |-- fitness.py
-|   |-- ga.py
-|   |-- nlp.py
-|   |-- normalize.py
-|   |-- organize.py
-|   |-- search.py
-|   `-- titles.py
-|-- src/
-|   |-- App.tsx
-|   |-- main.tsx
-|   |-- index.css
-|   |-- types.ts
-|   |-- services/
-|   |   `-- evolutionService.ts
-|   `-- utils/
-|       `-- webBookRender.ts
-|-- evolution_engine.py
-|-- server.ts
-|-- tests/
-|   |-- integration/
-|   |   |-- test_benchmark_queries.py
-|   |   |-- test_engine_contracts.py
-|   |   |-- test_fallback.py
-|   |   |-- test_pipeline_regression.py
-|   |   `-- test_query_focus.py
-|   |-- smoke/
-|   |   |-- test_malaysia_search.py
-|   |   |-- test_python.py
-|   |   `-- test_wikipedia.py
-|   `-- unit/
-|       |-- test_features.py
-|       |-- test_fitness.py
-|       |-- test_ga.py
-|       |-- test_nlp.py
-|       |-- test_organize.py
-|       |-- test_search_normalize.py
-|       `-- test_webbook_titles.py
-|-- index.html
-|-- vite.config.ts
-|-- tsconfig.json
-|-- package.json
-|-- package-lock.json
-|-- requirements.txt
-|-- .env.example
-|-- .gitignore
-|-- CHANGELOG.md
-|-- metadata.json
-`-- README.md
-```
-
-What each important file is responsible for:
-
-- `src/App.tsx`
-  Main UI, search workflow, progress states, history drawer, book rendering, and export actions.
-- `src/services/evolutionService.ts`
-  Frontend API client for `/api/search`, `/api/evolve`, and `/api/assemble`.
-- `src/utils/webBookRender.ts`
-  Render-time quality filters for definitions and sub-topics plus chapter pagination/render plans.
-- `src/types.ts`
-  Shared TypeScript types for books, chapters, definitions, sub-topics, and source references.
-- `server.ts`
-  Express server that proxies the frontend workflow into the Python engine.
-- `evolution_engine.py`
-  Thin orchestration/CLI adapter for search, evolve, and assemble modes.
-- `engine/search.py`
-  Search provider retrieval, manual-source fetching, page readability extraction, frontier ranking, and fallback gating.
-- `engine/archetypes.py`
-  Generic query-archetype inference used to keep fallback generation and chapter organization topic-agnostic while still recognizing person-like entity queries.
-- `engine/features.py`
-  Internal cached feature signals including definitional density, spam risk, content depth, and semantic coherence.
-- `engine/fitness.py`
-  Bounded composite fitness scoring used by the GA.
-- `engine/ga.py`
-  Population seeding, tournament selection, crossover, mutation, elitism, and convergence control.
-- `engine/organize.py`
-  Cluster-aware chapter organization and source grouping.
-- `engine/nlp.py`
-  Offline semantic helper layer backed by local open-source `scikit-learn`.
-- `engine/benchmarks.py`
-  Extensible synthetic benchmark library and summary metrics for backend quality tracking.
-- `tests/`
-  Python test suite organized into `unit`, `integration`, and `smoke` subfolders.
-- `index.html`
-  Root HTML shell and the `html2pdf` CDN include used for PDF export.
-- `vite.config.ts`
-  Vite config with React and Tailwind integration.
-- `requirements.txt`
-  Local Python dependency list for the offline semantic layer.
-- `.env.example`
-  Minimal environment template. No commercial API key is required.
-
-## Technical Stack
 
 ### Frontend
 
@@ -164,74 +90,53 @@ What each important file is responsible for:
 - Motion
 - Lucide React
 
-### Backend / Runtime
+### Server
 
 - Node.js
 - Express 4
-- CORS middleware
-- `tsx` for running `server.ts` in development
-- Python 3 for `evolution_engine.py`
+- CORS
+- `tsx` for development
 
-### Data / Content Pipeline
+### Python Engine
 
-- Wikipedia API for encyclopedic topic lookup
-- DuckDuckGo HTML search for broader public web-source discovery
-- Google HTML search for additional public web-result coverage
-- Bing search for alternative ranking and source diversity
-- User-supplied manual URLs fetched directly into the source pool
-- Local evolutionary + NLP layers for:
-  - source normalization
-  - benchmark scoring
-  - semantic coherence
-  - semantic clustering
-  - glossary extraction
-  - sub-topic extraction
-  - redundancy detection
-  - fitness scoring
-  - chapter assembly
-- Local adaptive fallback generation when network lookup is unavailable
-- Offline `scikit-learn` semantic similarity and latent topic signals
+- `evolution_engine.py` for CLI-style orchestration
+- `engine/search.py` for provider retrieval, enrichment, ranking, and fallback gating
+- `engine/ga.py` for source-set evolution
+- `engine/fitness.py` for source-set fitness scoring
+- `engine/nlp.py` and related modules for local semantic analysis
+- `engine/organize.py` and `engine/titles.py` for chapter shaping and title generation
 
-### Export / Presentation Dependencies
+## Key Files
 
-- `html2pdf.js` loaded via CDN for PDF export
-- browser-generated Blob downloads for `.txt`, `.html`, and `.doc`
-- Google Fonts for the UI typography
-- Picsum image seeds for chapter imagery
-
-## Evolution Engine Details
-
-The Python engine currently performs these stages:
-
-1. `Search`
-   Fetches and merges results from the enabled providers: Wikipedia, DuckDuckGo, Google, Bing, and any manual URLs supplied through the source portal.
-2. `Source cleanup`
-   Removes duplicate or low-signal concepts and builds fallback definitions/sub-topics when needed.
-3. `Feature extraction`
-   Computes cached quality signals including:
-   - query relevance
-   - definitional density
-   - spam/repetition risk
-   - content depth
-   - semantic coherence
-   - source trust
-4. `Fitness evaluation`
-   Scores candidate source sets using:
-   - query relevance
-   - informative score
-   - authority score
-   - concept diversity
-   - semantic coherence bonus
-   - redundancy penalties
-   - spam penalties
-5. `Evolution`
-   Uses greedy seeding plus crossover, mutation, and tournament-style selection.
-6. `Organization`
-   Groups evolved sources into cluster-aware chapter themes before assembly.
-7. `Assembly`
-   Synthesizes a 10-chapter web-book with chapter text, glossary items, sub-topics, visual seeds, and source links.
-8. `Benchmarking and regression`
-   Runs synthetic offline benchmark packs and backend regression suites to keep quality measurable without any live network dependency.
+```text
+.
+|-- engine/
+|   |-- fallback.py
+|   |-- features.py
+|   |-- fitness.py
+|   |-- ga.py
+|   |-- nlp.py
+|   |-- normalize.py
+|   |-- organize.py
+|   |-- search.py
+|   `-- titles.py
+|-- src/
+|   |-- components/
+|   |-- hooks/useWebBookEngine.ts
+|   |-- services/evolutionService.ts
+|   |-- services/exportService.ts
+|   `-- App.tsx
+|-- tests/
+|   |-- integration/
+|   |-- smoke/
+|   `-- unit/
+|-- evolution_engine.py
+|-- server.ts
+|-- package.json
+|-- requirements.txt
+|-- .env.example
+`-- README.md
+```
 
 ## Setup
 
@@ -239,7 +144,7 @@ The Python engine currently performs these stages:
 
 - Node.js
 - npm
-- Python 3 available on your `PATH` as `python`
+- Python 3 available as `python`
 
 ### Install
 
@@ -248,118 +153,73 @@ npm install
 python -m pip install -r requirements.txt
 ```
 
-### Environment
+## Environment
 
-Copy or review `.env.example` if needed:
+`.env.example` includes:
 
 ```env
 APP_URL="MY_APP_URL"
+WEBBOOK_CONTACT_EMAIL=""
 ```
 
-Notes:
-
-- No commercial AI or LLM API key is required.
-- No commercial model provider, cloud inference API, or hosted embedding service is used anywhere in the repo.
-- `APP_URL` is optional for local development.
+`WEBBOOK_CONTACT_EMAIL` is optional. If set, it is passed through to Crossref requests as a polite contact signal.
 
 ## Development
 
-Start the app:
+Start the local app:
 
 ```bash
 npm run dev
 ```
 
-The development server runs at:
+Default dev URL:
 
 ```text
 http://localhost:3000
 ```
 
-Helpful scripts:
+Useful commands:
 
 ```bash
-npm run dev
-npm run lint
 npm run build
-npm run preview
+npm run lint
 python -m unittest discover
 ```
 
-## How To Use
+## Runtime Budgets
 
-1. Start the local dev server.
-2. Enter a topic in the search box.
-3. Adjust the source portal if you want to disable providers or add manual URLs.
-4. Let the app complete search, evolution, and assembly.
-5. Read the generated web-book in the main panel.
-6. Reopen saved books from the history panel or export the current result.
+The frontend and backend now allow longer runs so larger source frontiers can be assembled:
 
-Request time budgets:
+- `search`: up to 420 seconds
+- `evolve`: up to 480 seconds
+- `assemble`: up to 480 seconds
 
-- `search`
-  The frontend and backend allow up to 3 minutes for complex retrieval and fallback orchestration.
-- `evolve` and `assemble`
-  The frontend and backend allow up to 5 minutes for heavier synthesis steps.
+The Express server also accepts larger JSON payloads than before to support richer search and evolution artifacts.
 
-## Export Behavior
+## Testing And Verification
 
-- `PDF`
-  Uses `html2pdf.js` when available and can fall back to browser print behavior.
-- `Word (.doc)`
-  Exports a Word-compatible HTML document with embedded styling.
-- `HTML`
-  Exports a standalone HTML page containing the rendered book.
-- `TXT`
-  Exports a plain text version of the generated book.
+The repo is currently validated with commands such as:
 
-## Benchmark And Regression Architecture
-
-- `tests/integration/test_engine_contracts.py`
-  Protects the `/api/search`, `/api/evolve`, and `/api/assemble` backend contract shapes.
-- `tests/integration/test_pipeline_regression.py`
-  Consolidates end-to-end backend regression checks for schema stability, concise chapter titles, and Malaysia-context preservation.
-- `tests/unit/test_ga.py`
-  Covers tournament bias, crossover validity, mutation uniqueness, elitism behavior, and convergence-on-plateau.
-- `tests/unit/test_organize.py`
-  Verifies cluster-aware organization and lower duplicate-source overlap than a naive baseline.
-- `tests/integration/test_benchmark_queries.py`
-  Runs the synthetic benchmark harness and checks suite-wide thresholds plus Malaysia-specific stability.
-- `engine/benchmarks.py`
-  Defines a broad, extensible library of benchmark cases and tag-based packs spanning technical, finance, science, policy, history, entertainment, logistics, legal, telecom, aviation, insurance, manufacturing, infrastructure, public-sector, and regional strategy topics.
-
-Benchmark metrics tracked per case and aggregated per pack:
-
-- average relevance
-- focus coverage
-- redundancy
-- chapter distinctness
-- average authority
-
-Statistical summaries also include median, standard deviation, min/max, and interquartile spread so benchmark baselines are not based on a single narrow mean alone.
+```bash
+npm run build
+python -B -m unittest tests.unit.test_search_normalize tests.integration.test_fallback tests.integration.test_engine_contracts
+```
 
 ## Notes And Limitations
 
-- Search quality depends on Wikipedia availability, DuckDuckGo availability, and outbound network access.
-- Google and Bing HTML scraping are best-effort and may be blocked or return fewer results depending on network conditions or anti-bot protections.
-- When search access is blocked or unavailable, the engine falls back to adaptive synthetic sources so the UI remains usable.
-- The fallback layer is topic-agnostic, but it still performs best when at least some real source material is retrievable for the query.
-- The semantic layer is fully local and offline, but it still depends on the quality of retrieved source text and the locally installed open-source Python stack.
-- Chapter images come from Picsum and are decorative seed-based visuals, not topic-accurate illustrations.
-- Browser history is stored locally in `localStorage`, not in a shared database.
-- PDF export depends on the CDN-loaded `html2pdf` bundle referenced in `index.html`.
+- `Google` and `Bing` retrieval remain best-effort and may be rate-limited or blocked.
+- `Crossref` and `Open Library` improve topic quality, but they are metadata-oriented sources and do not replace full-text access.
+- manual URLs are capped to keep the frontier controllable
+- fallback synthesis still exists for resilience, but the engine now tries harder to build from real public evidence first
+- export behavior depends partly on browser behavior, especially for Print / Save as PDF
 
-## Verification
+## No Paid AI Dependency
 
-The current codebase has been validated with:
+This repo does not require:
 
-```bash
-npm run lint
-npm run build
-python -m unittest discover
-python -m py_compile evolution_engine.py
-```
+- commercial LLM APIs
+- hosted embedding APIs
+- paid search APIs
+- paid model providers
 
-## License
-
-MIT
+The generation strategy is local, evolutionary, retrieval-driven, and based on public/free data sources.

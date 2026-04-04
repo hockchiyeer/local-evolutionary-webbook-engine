@@ -1,20 +1,11 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, type FormEvent } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import {
-  AlertCircle,
-  Cpu,
-  Dna,
-  Info,
-  Layers,
-  Loader2,
-  Plus,
-  Search,
-  X,
-  ExternalLink,
-  Trash2
-} from 'lucide-react';
-import type { EvolutionState, WebPageGenotype, SearchSourceConfig, SearchSourceKey, SearchExecutionMode } from '../types';
-import { SOURCE_PORTAL_CARDS, EXECUTION_MODE_CARDS } from '../hooks/useWebBookEngine';
+import { AlertCircle, Cpu, Dna, ExternalLink, Info, Layers, Loader2, Plus, Search, Trash2, X } from 'lucide-react';
+import type { EvolutionState, SearchExecutionMode, SearchSourceConfig, SearchSourceKey, WebPageGenotype } from '../types';
+import type { ArtifactProviderStatus, ArtifactsState } from '../hooks/useWebBookEngine';
+import { EXECUTION_MODE_CARDS, SOURCE_PORTAL_CARDS } from '../hooks/useWebBookEngine';
+
+type PipelineStageState = 'idle' | 'queued' | 'active' | 'complete' | 'error';
 
 interface ControlSidebarProps {
   query: string;
@@ -22,11 +13,11 @@ interface ControlSidebarProps {
   state: EvolutionState;
   error: string | null;
   notice: string | null;
+  artifacts: ArtifactsState;
   showArtifacts: boolean;
   onToggleArtifacts: () => void;
   onSearch: () => Promise<void>;
   onStartNewSearch: () => void;
-  // New props for Local Evolutionary Engine
   sourceConfig: SearchSourceConfig;
   manualSourceInput: string;
   setManualSourceInput: (value: string) => void;
@@ -37,12 +28,72 @@ interface ControlSidebarProps {
   removeManualSource: (url: string) => void;
 }
 
+const PROVIDER_STATUS_LABELS: Record<ArtifactProviderStatus['status'], string> = {
+  queued: 'Queued',
+  running: 'Running',
+  complete: 'Complete',
+  error: 'Issue',
+};
+
+const PIPELINE_STATUS_LABELS: Record<PipelineStageState, string> = {
+  idle: 'Idle',
+  queued: 'Queued',
+  active: 'Running',
+  complete: 'Complete',
+  error: 'Issue',
+};
+
+const formatDuration = (ms: number | null | undefined) => {
+  if (!ms || ms <= 0) return 'Just started';
+  const totalSeconds = Math.max(1, Math.round(ms / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
+};
+
+const statusTone = (status?: ArtifactProviderStatus['status']) => {
+  switch (status) {
+    case 'running':
+      return 'border-[#1f4d72] bg-[#e4f2fb] text-[#17405f]';
+    case 'complete':
+      return 'border-[#245c39] bg-[#e8f6ea] text-[#1f4f31]';
+    case 'error':
+      return 'border-[#8c2f2f] bg-[#fdecec] text-[#7a2727]';
+    case 'queued':
+      return 'border-[#9d7d56] bg-[#f2e5d1] text-[#6c5236]';
+    default:
+      return 'border-[#d9cfbf] bg-[#f6f0e5] text-[#7a6c5a]';
+  }
+};
+
+const stageTone = (status: PipelineStageState) => {
+  switch (status) {
+    case 'active':
+      return 'border-[#17405f] bg-[#eff7fd]';
+    case 'complete':
+      return 'border-[#1f4f31] bg-[#eef8f0]';
+    case 'error':
+      return 'border-[#7a2727] bg-[#fff1f1]';
+    case 'queued':
+      return 'border-[#9d7d56] bg-[#fbf4ea]';
+    default:
+      return 'border-[#ded4c7] bg-[#fffdf8]';
+  }
+};
+
+const summarizeProviders = (result: WebPageGenotype) => {
+  const providers = result.searchProviders?.length ? result.searchProviders : [result.searchProvider];
+  return providers.filter(Boolean).join(' | ') || 'source';
+};
+
 export function ControlSidebar({
   query,
   onQueryChange,
   state,
   error,
   notice,
+  artifacts,
   showArtifacts,
   onToggleArtifacts,
   onSearch,
@@ -56,173 +107,169 @@ export function ControlSidebar({
   addManualSources,
   removeManualSource,
 }: ControlSidebarProps) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const formRef = useRef<HTMLFormElement>(null);
   const artifactsRef = useRef<HTMLElement>(null);
-  const [isOverflowing, setIsOverflowing] = useState(false);
-  const [isHoveringInput, setIsHoveringInput] = useState(false);
-  const [tooltipPosition, setTooltipPosition] = useState<'top' | 'bottom'>('top');
-
-  const enabledBuiltInSourceCount = Object.values(sourceConfig.sources).filter(Boolean).length;
-  const totalEnabledSourceCount = enabledBuiltInSourceCount + sourceConfig.manualUrls.length;
+  const isBusy = state.status !== 'idle' && state.status !== 'complete';
+  const totalEnabledSourceCount = Object.values(sourceConfig.sources).filter(Boolean).length + sourceConfig.manualUrls.length;
+  const runtimeMs = artifacts.startedAt ? (artifacts.updatedAt ?? Date.now()) - artifacts.startedAt : null;
+  const frontierCount = artifacts.searchResults.length;
+  const evolvedCount = artifacts.evolvedPopulation.length;
+  const chapterCount = artifacts.assembledBook?.chapters.length ?? 0;
+  const completedProviders = artifacts.providerStatuses.filter((status) => status.status === 'complete' || status.status === 'error').length;
+  const bestFitness = state.bestFitness || Math.max(0, ...state.population.map((candidate) => candidate.fitness || 0));
+  const providerStatusMap = new Map(artifacts.providerStatuses.map((status) => [status.provider, status]));
+  const manualStatus = providerStatusMap.get('manual');
+  const supplementalStatuses = artifacts.providerStatuses.filter(
+    (status) => !SOURCE_PORTAL_CARDS.some((card) => card.key === status.provider) && status.provider !== 'manual',
+  );
 
   useEffect(() => {
-    if (showArtifacts && artifactsRef.current) {
-      const timer = window.setTimeout(() => {
-        artifactsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 150);
-      return () => window.clearTimeout(timer);
-    }
+    if (!showArtifacts || !artifactsRef.current) return;
+    const timer = window.setTimeout(() => {
+      artifactsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+    return () => window.clearTimeout(timer);
   }, [showArtifacts]);
-
-  useEffect(() => {
-    if (isHoveringInput && formRef.current) {
-      const rect = formRef.current.getBoundingClientRect();
-      setTooltipPosition(rect.top < 320 ? 'bottom' : 'top');
-    }
-  }, [isHoveringInput, query]);
-
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = '82px';
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
-    }
-  }, [query]);
-
-  useEffect(() => {
-    if (textareaRef.current && query) {
-      const element = textareaRef.current;
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d');
-      if (context) {
-        const style = window.getComputedStyle(element);
-        context.font = style.font;
-        const metrics = context.measureText(query);
-        const textWidth = metrics.width;
-        const paddingLeft = Number.parseFloat(style.paddingLeft);
-        const paddingRight = Number.parseFloat(style.paddingRight);
-        const availableWidth = element.clientWidth - paddingLeft - paddingRight;
-        setIsOverflowing(textWidth > availableWidth);
-        return;
-      }
-    }
-    setIsOverflowing(false);
-  }, [query]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     await onSearch();
   };
 
-  const isBusy = state.status !== 'idle' && state.status !== 'complete';
-  const progressText = state.status === 'complete' ? '100%' : 'In Progress';
-  const searchSummary = undefined; // local-evolutionary artifacts don't have searchSummary
+  const searchStage: PipelineStageState = artifacts.status === 'error' && frontierCount === 0
+    ? 'error'
+    : state.status === 'searching'
+      ? 'active'
+      : (frontierCount > 0 || state.status === 'evolving' || state.status === 'assembling' || state.status === 'complete')
+        ? 'complete'
+        : 'idle';
+
+  const evolveStage: PipelineStageState = artifacts.status === 'error' && frontierCount > 0 && evolvedCount === 0
+    ? 'error'
+    : state.status === 'evolving'
+      ? 'active'
+      : (evolvedCount > 0 || state.status === 'assembling' || state.status === 'complete')
+        ? 'complete'
+        : state.status === 'searching'
+          ? 'queued'
+          : 'idle';
+
+  const assembleStage: PipelineStageState = artifacts.status === 'error' && evolvedCount > 0 && chapterCount === 0
+    ? 'error'
+    : state.status === 'assembling'
+      ? 'active'
+      : (chapterCount > 0 || state.status === 'complete')
+        ? 'complete'
+        : (state.status === 'searching' || state.status === 'evolving')
+          ? 'queued'
+          : 'idle';
+
+  const stages = [
+    {
+      key: 'search',
+      label: 'Source Discovery',
+      detail: 'Live retrieval, metadata intake, dedupe, semantic filtering, and excerpt enrichment.',
+      metric: artifacts.providerStatuses.length ? `${completedProviders}/${artifacts.providerStatuses.length} lanes resolved` : 'Waiting for launch',
+      icon: Search,
+      state: searchStage,
+    },
+    {
+      key: 'evolve',
+      label: 'Evolutionary Selection',
+      detail: 'Feature scoring, redundancy penalties, crossover, mutation, and ranked source selection.',
+      metric: evolvedCount ? `${evolvedCount} ranked candidates` : (frontierCount ? `${frontierCount} frontier candidates ready` : 'Waiting for frontier'),
+      icon: Dna,
+      state: evolveStage,
+    },
+    {
+      key: 'assemble',
+      label: 'NLP Book Assembly',
+      detail: 'Cluster-aware chapter shaping, semantic title paths, and sentence-level micro-GA assembly.',
+      metric: chapterCount ? `${chapterCount} chapters assembled` : (evolvedCount ? 'Assembly in progress' : 'Waiting for evolved frontier'),
+      icon: Cpu,
+      state: assembleStage,
+    },
+  ];
 
   return (
-    <div data-html2canvas-ignore="true" className="lg:col-span-4 space-y-8 print:hidden">
-      <section className="bg-white border border-[#141414] p-6 shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="font-serif italic text-sm uppercase opacity-50">Targeted Ingestion</h2>
+    <div data-html2canvas-ignore="true" className="lg:col-span-4 space-y-6 print:hidden">
+      <section className="rounded-[28px] border border-[#1f1a14] bg-[linear-gradient(180deg,#fffef8_0%,#f3eadc_100%)] p-6 shadow-[0_24px_60px_-34px_rgba(34,24,12,0.45)]">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-[#7b6e5d]">WebBook Studio</p>
+            <p className="mt-3 max-w-md text-sm leading-6 text-[#5d5245]">Set the prompt, evidence blend, and runtime behavior for the next synthesis.</p>
+          </div>
           <button
             onClick={onStartNewSearch}
-            title="Reset engine and start a new search"
-            className="text-[10px] uppercase font-bold flex items-center gap-1 hover:underline"
+            className="shrink-0 rounded-full border border-[#1d1710] px-4 py-2 text-[10px] font-bold uppercase tracking-[0.22em] text-[#1d1710] transition hover:bg-[#1d1710] hover:text-[#fffaf2]"
           >
-            <Plus size={12} /> New Search
+            <span className="inline-flex items-center gap-1.5"><Plus size={12} />New Search</span>
           </button>
         </div>
 
-        <form
-          ref={formRef}
-          onSubmit={(event) => void handleSubmit(event)}
-          className="relative"
-          onMouseEnter={() => setIsHoveringInput(true)}
-          onMouseLeave={() => setIsHoveringInput(false)}
-          onFocus={() => setIsHoveringInput(true)}
-          onBlur={() => setIsHoveringInput(false)}
-          onClick={() => setIsHoveringInput(true)}
-        >
-          <AnimatePresence>
-            {isOverflowing && isHoveringInput && query && (
-              <motion.div
-                initial={{ opacity: 0, y: tooltipPosition === 'top' ? 10 : -10, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: tooltipPosition === 'top' ? 10 : -10, scale: 0.95 }}
-                className={`absolute ${tooltipPosition === 'top' ? 'bottom-full mb-3' : 'top-full mt-3'} left-0 w-full z-[60] pointer-events-none`}
-              >
-                <div className="bg-yellow-300 text-[#141414] p-4 border-2 border-[#141414] shadow-[6px_6px_0px_0px_rgba(20,20,20,1)] text-sm font-mono break-words max-h-[40vh] overflow-y-auto custom-scrollbar pointer-events-auto">
-                  <div className="flex items-center gap-2 mb-2 opacity-70 text-[10px] uppercase font-bold tracking-widest">
-                    <Info size={12} className="text-[#141414]" /> Full Search Query Preview
-                  </div>
-                  <div className="leading-relaxed whitespace-pre-wrap">{query}</div>
-                  <div className="mt-2 text-[9px] opacity-40 italic">
-                    Text exceeds box width. Showing full query for accessibility.
-                  </div>
-                </div>
-                <div className={`absolute ${tooltipPosition === 'top' ? '-bottom-2 border-r-2 border-b-2' : '-top-2 border-l-2 border-t-2'} left-8 w-4 h-4 bg-yellow-300 border-[#141414] rotate-45`} />
-              </motion.div>
-            )}
-          </AnimatePresence>
+        <form onSubmit={(event) => void handleSubmit(event)} className="mt-6 space-y-3">
+          <label className="block text-[11px] font-semibold uppercase tracking-[0.28em] text-[#7b6e5d]">Reading Prompt</label>
+          <div className="relative">
+            <textarea
+              rows={4}
+              value={query}
+              onChange={(event) => onQueryChange(event.target.value)}
+              placeholder="Enter a topic, person, book, research theme, market, historical event, or technical subject..."
+              className="min-h-[140px] w-full rounded-[22px] border border-[#1f1a14] bg-[#fffdf7] px-5 py-4 pr-16 text-base leading-7 text-[#1d1710] shadow-inner focus:outline-none focus:ring-2 focus:ring-[#b68c55] disabled:cursor-not-allowed disabled:opacity-70"
+              disabled={isBusy}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  void onSearch();
+                }
+              }}
+            />
+            <button
+              type="submit"
+              className="absolute bottom-4 right-4 flex h-11 w-11 items-center justify-center rounded-full bg-[#1d1710] text-[#fffaf2] transition hover:bg-[#2f261c] disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isBusy}
+            >
+              {isBusy ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
+            </button>
+          </div>
 
-          <textarea
-            ref={textareaRef}
-            rows={2}
-            value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
-            placeholder="Enter search topic..."
-            className="w-full bg-[#F5F5F5] border border-[#141414] p-4 pr-14 focus:outline-none focus:ring-0 text-base sm:text-lg font-mono resize-none overflow-y-auto max-h-[160px] min-h-[82px]"
-            disabled={isBusy}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                void onSearch();
-              }
-            }}
-          />
-          <button
-            type="submit"
-            title="Execute evolutionary synthesis pipeline"
-            className="absolute right-4 top-4 w-8 h-8 bg-[#141414] text-[#E4E3E0] flex items-center justify-center hover:bg-opacity-90 transition-colors disabled:opacity-50 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.2)]"
-            disabled={isBusy}
-          >
-            {isBusy ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
-          </button>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="min-w-0 rounded-[18px] border border-[#d8cbb7] bg-[#fffdf7] p-4">
+              <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Sources</div>
+              <div className="mt-2 text-2xl font-semibold text-[#1d1710]">{totalEnabledSourceCount}</div>
+            </div>
+            <div className="min-w-0 rounded-[18px] border border-[#d8cbb7] bg-[#fffdf7] p-4">
+              <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Mode</div>
+              <div className="mt-2 min-w-0 break-words text-base font-semibold leading-tight text-[#1d1710] sm:text-lg">
+                {sourceConfig.executionMode === 'parallel' ? 'Parallel' : 'Sequential'}
+              </div>
+            </div>
+            <div className="col-span-2 min-w-0 rounded-[18px] border border-[#d8cbb7] bg-[#fffdf7] p-4 sm:col-span-1">
+              <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Elapsed</div>
+              <div className="mt-2 min-w-0 break-words text-base font-semibold leading-tight text-[#1d1710] sm:text-lg">{runtimeMs ? formatDuration(runtimeMs) : 'Not started'}</div>
+            </div>
+          </div>
         </form>
-
-        <p className="mt-3 text-[10px] opacity-60 leading-relaxed">
-          Initiates a multi-tiered pipeline: Targeted Crawling - NLP Extraction - Evolutionary Processing - Assembly.
-        </p>
       </section>
 
-      {/* Source Portal */}
-      {state.status === 'idle' && (
-      <section className="bg-white border border-[#141414] p-6 shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]">
-        <div className="flex justify-between items-center mb-4 gap-4">
+      <section className="rounded-[28px] border border-[#d7cbbb] bg-[#fffef9] p-6 shadow-[0_18px_46px_-34px_rgba(44,31,17,0.42)]">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="font-serif italic text-sm uppercase opacity-50">Source Portal</h2>
-            <p className="mt-1 text-[10px] opacity-60 leading-relaxed">
-              Blend multiple public sources by default, opt any source in or out, and add direct URLs when you want tighter control.
-            </p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#8a7b67]">Source Portfolio</p>
+            <h3 className="mt-2 font-serif text-[1.7rem] leading-none text-[#1d1710]">Control the evidence blend</h3>
           </div>
-          <span className="shrink-0 text-[10px] uppercase font-bold tracking-widest px-2 py-1 border border-[#141414] bg-[#F5F5F5]">
-            {totalEnabledSourceCount} active
-          </span>
+          <div className="rounded-full border border-[#cdbfae] bg-[#f7efe2] px-3 py-1 text-[10px] uppercase tracking-[0.24em] text-[#6b5b4a]">{totalEnabledSourceCount} active</div>
         </div>
 
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-3">
+        <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
           {SOURCE_PORTAL_CARDS.map((source) => {
             const checked = sourceConfig.sources[source.key];
-            const sourceToggleTitle = `${source.label}: ${source.description} ${source.usage} ${checked ? 'Toggle off to exclude it from the next search.' : 'Toggle on to include it in the next search.'}`;
-
+            const progress = providerStatusMap.get(source.key);
             return (
-              <article
-                key={source.key}
-                className={`border p-3 transition-all ${checked ? 'bg-[#141414] text-[#E4E3E0]' : 'bg-[#F8F8F8] text-[#141414]'} ${isBusy ? 'opacity-70' : 'hover:translate-x-[2px] hover:translate-y-[2px]'}`}
-                title={sourceToggleTitle}
-              >
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-                  <div className="min-w-0">
-                    <span className="block text-[11px] uppercase font-bold tracking-[0.24em]">{source.label}</span>
+              <article key={source.key} className={`overflow-hidden rounded-[22px] border p-4 ${checked ? 'border-[#1f1a14] bg-[#1f1a14] text-[#fffaf2]' : 'border-[#d8ccbd] bg-[#fcf7ef] text-[#1d1710]'}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className={`text-[10px] uppercase tracking-[0.24em] ${checked ? 'text-[#d2c4af]' : 'text-[#8b7b68]'}`}>{source.category}</div>
+                    <h4 className="mt-2 break-words text-lg font-semibold">{source.label}</h4>
                   </div>
                   <button
                     type="button"
@@ -230,57 +277,53 @@ export function ControlSidebar({
                     aria-checked={checked}
                     disabled={isBusy}
                     onClick={() => toggleBuiltInSource(source.key)}
-                    className={`relative mt-0.5 h-4 w-8 shrink-0 rounded-full border transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[#141414] focus-visible:ring-offset-2 ${
+                    className={`mt-1 inline-flex h-6 w-11 shrink-0 items-center rounded-full border p-[3px] transition-colors ${
                       checked
-                        ? 'border-white/30 bg-white/10'
-                        : 'border-[#141414]/20 bg-white'
+                        ? 'justify-end border-[#d4c5b3] bg-[#f6ede1]'
+                        : 'justify-start border-[#b8a792] bg-[#ece3d7]'
                     } ${isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
-                    aria-label={`${checked ? 'Turn off' : 'Turn on'} ${source.label}. ${source.usage}`}
                   >
                     <span
-                      className={`absolute top-1/2 left-0 h-2.5 w-2.5 -translate-y-1/2 rounded-full transition-transform ${
-                        checked
-                          ? 'translate-x-[1.1rem] bg-[#E4E3E0]'
-                          : 'translate-x-0.5 bg-[#141414]'
+                      className={`block h-4 w-4 rounded-full transition-colors ${
+                        checked ? 'bg-[#1d1710]' : 'bg-[#9b8b77]'
                       }`}
                     />
                   </button>
                 </div>
+
+                <p className={`mt-3 text-sm leading-6 ${checked ? 'text-[#f5ebdc]' : 'text-[#5f5448]'}`}>{source.description}</p>
+                <p className={`mt-3 text-[12px] leading-5 ${checked ? 'text-[#dbcbb6]' : 'text-[#7a6b58]'}`}>{source.usage}</p>
+
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <span className={`rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] ${statusTone(progress?.status)}`}>
+                    {progress ? PROVIDER_STATUS_LABELS[progress.status] : (checked ? 'Enabled' : 'Disabled')}
+                  </span>
+                  {progress && (
+                    <span className={`rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] ${checked ? 'border-white/15 bg-white/5 text-[#f6ecde]' : 'border-[#d7cab8] bg-[#fffdf8] text-[#6c5d49]'}`}>
+                      {progress.resultCount} hits
+                    </span>
+                  )}
+                </div>
+
+                {progress && (
+                  <div className={`mt-4 grid grid-cols-2 gap-2 text-[11px] ${checked ? 'text-[#f5ebdc]' : 'text-[#5f5448]'}`}>
+                    <div className={`rounded-[16px] border px-3 py-2 ${checked ? 'border-white/12 bg-white/6' : 'border-[#e0d5c7] bg-white/80'}`}>frontier {progress.frontierCount}</div>
+                    <div className={`rounded-[16px] border px-3 py-2 ${checked ? 'border-white/12 bg-white/6' : 'border-[#e0d5c7] bg-white/80'}`}>{formatDuration(progress.durationMs)}</div>
+                  </div>
+                )}
               </article>
             );
           })}
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setAllBuiltInSources(true)}
-            disabled={isBusy}
-            className="px-3 py-1.5 border border-[#141414] text-[9px] uppercase font-bold tracking-widest hover:bg-[#141414] hover:text-white transition-all disabled:opacity-50"
-          >
-            All On
-          </button>
-          <button
-            type="button"
-            onClick={() => setAllBuiltInSources(false)}
-            disabled={isBusy}
-            className="px-3 py-1.5 border border-[#141414] text-[9px] uppercase font-bold tracking-widest hover:bg-[#141414] hover:text-white transition-all disabled:opacity-50"
-          >
-            All Off
-          </button>
+          <button type="button" onClick={() => setAllBuiltInSources(true)} disabled={isBusy} className="rounded-full border border-[#1d1710] px-4 py-2 text-[10px] uppercase tracking-[0.22em] text-[#1d1710] transition hover:bg-[#1d1710] hover:text-[#fffaf2] disabled:opacity-50">All On</button>
+          <button type="button" onClick={() => setAllBuiltInSources(false)} disabled={isBusy} className="rounded-full border border-[#c9baa7] px-4 py-2 text-[10px] uppercase tracking-[0.22em] text-[#6b5b4a] transition hover:border-[#1d1710] hover:text-[#1d1710] disabled:opacity-50">All Off</button>
         </div>
 
-        <div className="mt-5 pt-5 border-t border-[#141414]/10">
-          <div className="flex items-start justify-between gap-4 mb-3">
-            <div>
-              <h3 className="text-[10px] uppercase font-bold tracking-widest">Execution Mode</h3>
-            </div>
-            <span className="shrink-0 text-[9px] uppercase font-bold tracking-widest px-2 py-1 border border-[#141414]/10 bg-[#F5F5F5]">
-              {sourceConfig.executionMode === 'parallel' ? 'High Throughput' : 'Recommended'}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-3">
+        <div className="mt-6 rounded-[22px] border border-[#e0d5c7] bg-[#fcf7ef] p-4">
+          <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Execution Mode</div>
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {EXECUTION_MODE_CARDS.map((mode) => {
               const selected = sourceConfig.executionMode === mode.key;
               return (
@@ -289,59 +332,49 @@ export function ControlSidebar({
                   type="button"
                   onClick={() => setExecutionMode(mode.key)}
                   disabled={isBusy}
-                  className={`min-w-0 text-left border p-3 transition-all ${
-                    selected ? 'bg-[#141414] text-[#E4E3E0]' : 'bg-[#F8F8F8] text-[#141414]'
-                  } ${isBusy ? 'opacity-70 cursor-not-allowed' : 'hover:translate-x-[2px] hover:translate-y-[2px]'}`}
-                  title={mode.description}
+                  className={`min-w-0 rounded-[18px] border p-4 text-left ${selected ? 'border-[#1d1710] bg-[#1d1710] text-[#fffaf2]' : 'border-[#d8ccbd] bg-[#fffdf8] text-[#1d1710]'} disabled:opacity-60`}
                 >
-                  <span className="block text-[10px] uppercase font-bold tracking-widest">{mode.label}</span>
+                  <div className={`break-words text-[10px] uppercase tracking-[0.22em] ${selected ? 'text-[#d5c8b5]' : 'text-[#8a7b67]'}`}>{mode.label}</div>
+                  <p className={`mt-3 text-sm leading-6 ${selected ? 'text-[#f3e7d7]' : 'text-[#5f5448]'}`}>{mode.description}</p>
                 </button>
               );
             })}
           </div>
         </div>
 
-        <div className="mt-5 pt-5 border-t border-[#141414]/10">
-          <label className="block text-[10px] uppercase font-bold tracking-widest mb-2">
-            Manual Sources
-          </label>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <textarea
-              rows={2}
-              value={manualSourceInput}
-              onChange={(e) => setManualSourceInput(e.target.value)}
-              placeholder="Paste URLs separated by spaces"
-              disabled={isBusy}
-              className="flex-1 bg-[#F5F5F5] border border-[#141414] p-3 focus:outline-none focus:ring-0 text-sm font-mono resize-y min-h-[60px] disabled:opacity-60"
-            />
-            <button
-              type="button"
-              onClick={addManualSources}
-              disabled={isBusy}
-              className="px-4 py-3 bg-[#141414] text-[#E4E3E0] text-[10px] uppercase font-bold tracking-widest hover:bg-opacity-90 transition-all disabled:opacity-50"
-            >
-              Add Source
-            </button>
+        <div className="mt-6 rounded-[22px] border border-[#e0d5c7] bg-[#fffdf7] p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Manual Sources</div>
+              <p className="mt-2 text-sm leading-6 text-[#635847]">Paste direct pages when you want a document guaranteed in the frontier. Up to 12 URLs can be staged.</p>
+            </div>
+            {manualStatus && (
+              <span className={`rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] ${statusTone(manualStatus.status)}`}>
+                {PROVIDER_STATUS_LABELS[manualStatus.status]}
+              </span>
+            )}
           </div>
+
+          <div className="mt-4 flex flex-col gap-3">
+            <textarea
+              rows={3}
+              value={manualSourceInput}
+              onChange={(event) => setManualSourceInput(event.target.value)}
+              placeholder="https://example.com/article-one https://example.org/report-two"
+              disabled={isBusy}
+              className="min-h-[96px] w-full rounded-[18px] border border-[#d5c8b5] bg-[#fcf7ef] px-4 py-3 text-sm leading-6 text-[#1d1710] focus:outline-none focus:ring-2 focus:ring-[#b68c55] disabled:opacity-60"
+            />
+            <button type="button" onClick={addManualSources} disabled={isBusy} className="rounded-full bg-[#1d1710] px-4 py-3 text-[10px] uppercase tracking-[0.22em] text-[#fffaf2] transition hover:bg-[#2f261c] disabled:opacity-60">Add Manual Source</button>
+          </div>
+
           {sourceConfig.manualUrls.length > 0 && (
             <div className="mt-4 space-y-2">
               {sourceConfig.manualUrls.map((url) => (
-                <div key={url} className="flex items-center justify-between gap-3 border border-[#141414]/10 bg-[#F8F8F8] px-3 py-2">
-                  <a
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[11px] font-mono break-all hover:underline flex items-center gap-2"
-                  >
-                    <ExternalLink size={12} className="shrink-0" />
-                    {url.substring(0, 40) + '...'}
+                <div key={url} className="flex items-center justify-between gap-3 rounded-[16px] border border-[#e2d6c8] bg-[#fcf7ef] px-3 py-3">
+                  <a href={url} target="_blank" rel="noopener noreferrer" className="min-w-0 flex-1 break-all text-[11px] leading-5 text-[#1d1710] hover:underline">
+                    <span className="inline-flex items-center gap-2"><ExternalLink size={12} className="shrink-0" />{url}</span>
                   </a>
-                  <button
-                    type="button"
-                    onClick={() => removeManualSource(url)}
-                    disabled={isBusy}
-                    className="shrink-0 p-2 text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
-                  >
+                  <button type="button" onClick={() => removeManualSource(url)} disabled={isBusy} className="rounded-full border border-[#ebc0c0] p-2 text-[#8a2b2b] transition hover:bg-[#fff1f1] disabled:opacity-50">
                     <Trash2 size={14} />
                   </button>
                 </div>
@@ -349,150 +382,94 @@ export function ControlSidebar({
             </div>
           )}
         </div>
-      </section>
-      )}
 
-      {/* Evolutionary Metrics */}
-      <section className="bg-white border border-[#141414] p-6 shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="font-serif italic text-sm uppercase opacity-50">Evolutionary Metrics</h2>
-          <div className="flex items-center gap-3">
-            <AnimatePresence>
-              {state.status !== 'idle' && state.status !== 'complete' && !showArtifacts && (
-                <motion.div
-                  initial={{ opacity: 0, x: 10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 10 }}
-                  className="flex items-center gap-2"
-                >
-                  <div className="flex items-center gap-1 bg-red-50 px-1.5 py-0.5 border border-red-200 rounded-sm">
-                    <motion.div
-                      animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }}
-                      transition={{ repeat: Infinity, duration: 1.5 }}
-                      className="w-1.5 h-1.5 bg-red-600 rounded-full"
-                    />
-                    <motion.span
-                      animate={{ opacity: [1, 0, 1, 0.2, 1] }}
-                      transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}
-                      className="text-[8px] font-black text-red-600 tracking-tighter"
-                    >
-                      LIVE
-                    </motion.span>
+        {supplementalStatuses.length > 0 && (
+          <div className="mt-4 rounded-[20px] border border-[#e0d5c7] bg-[#fffaf3] p-4">
+            <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Supplemental Stages</div>
+            <div className="mt-3 space-y-2">
+              {supplementalStatuses.map((status) => (
+                <div key={status.provider} className="rounded-[16px] border border-[#dccfbe] bg-[#fffef9] p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-[#1d1710]">{status.label}</div>
+                      <div className="mt-1 text-[11px] leading-5 text-[#6b5b4a]">{status.description}</div>
+                    </div>
+                    <span className={`rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] ${statusTone(status.status)}`}>
+                      {PROVIDER_STATUS_LABELS[status.status]}
+                    </span>
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-            <button
-              onClick={onToggleArtifacts}
-              title={showArtifacts ? 'Close the technical artifacts panel' : 'View raw search results, evolutionary population, and assembly trace'}
-              className={`text-[10px] uppercase font-bold flex items-center gap-1 px-2 py-1 border border-[#141414] transition-all ${showArtifacts ? 'bg-[#141414] text-white' : 'hover:bg-[#F5F5F5]'}`}
-            >
-              <Layers size={12} /> {showArtifacts ? 'Hide Artifacts' : 'Show Artifacts'}
-            </button>
-          </div>
-        </div>
-
-        <div className="space-y-6">
-          <div className="flex justify-between items-end border-b border-[#141414] pb-2">
-            <span className="text-[11px] uppercase font-bold">Status</span>
-            <span className={`text-[11px] uppercase font-mono px-2 py-0.5 rounded-full ${state.status === 'complete' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
-              {state.status}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="border border-[#141414] p-3 bg-[#F5F5F5]">
-              <span className="block text-[9px] uppercase opacity-50 mb-1">Generation</span>
-              <span className="text-2xl font-mono font-bold">{state.generation}</span>
-            </div>
-            <div className="border border-[#141414] p-3 bg-[#F5F5F5]">
-              <span className="block text-[9px] uppercase opacity-50 mb-1">Pop. Size</span>
-              <span className="text-2xl font-mono font-bold">{state.population?.length || 0}</span>
+                </div>
+              ))}
             </div>
           </div>
-
-          {state.status !== 'idle' && (
-            <div className="space-y-2">
-              <div className="flex justify-between text-[10px] uppercase font-bold">
-                <span>Processing Pipeline</span>
-                <span>{progressText}</span>
-              </div>
-              <div className="h-2 bg-[#F5F5F5] border border-[#141414] overflow-hidden">
-                <motion.div
-                  className="h-full bg-[#141414]"
-                  initial={{ width: 0 }}
-                  animate={{ width: state.status === 'complete' ? '100%' : '60%' }}
-                  transition={{ duration: 2, ease: 'easeInOut' }}
-                />
-              </div>
-            </div>
-          )}
-
-          {notice && (
-            <div className="bg-amber-50 border border-amber-200 p-3 text-amber-900 text-xs flex gap-2 items-start">
-              <AlertCircle size={14} className="shrink-0 mt-0.5" />
-              <span>{notice}</span>
-            </div>
-          )}
-
-          {error && (
-            <div className="bg-red-50 border border-red-200 p-3 text-red-800 text-xs flex gap-2 items-start">
-              <AlertCircle size={14} className="shrink-0 mt-0.5" />
-              <span>{error}</span>
-            </div>
-          )}
-        </div>
+        )}
       </section>
 
-      {/* Fitness Function and Sequence */}
-      <section className="bg-white border border-[#141414] p-6 shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]">
-        <h3 className="text-[10px] uppercase font-bold mb-3 flex items-center justify-between">
-          <span className="flex items-center gap-2"><Dna size={12} /> Fitness Function F(S)</span>
-          <span className="font-mono text-[9px] opacity-40" title="Macro-GA [Sources] + Micro-GA [Sentences]">v3.0_DUAL_EVO</span>
-        </h3>
-        <div className="space-y-3 font-mono text-[10px]">
-          <div className="flex justify-between items-end border-b border-[#141414]/20 pb-2">
-            <div className="flex flex-col">
-              <span className="text-[8px] opacity-50 uppercase tracking-tighter">2-Stage Extractor Formula</span>
-              <span className="text-[10px] font-bold tracking-tight">F(S)=Σ[Re,In,Au,Co,Di,St] ➔ μGA(w)</span>
-            </div>
-            <div className="flex flex-col items-end">
-              <span className="text-[8px] opacity-40 uppercase tracking-tighter">Current Best</span>
-              <span className="text-[14px] font-bold leading-none">{(state.bestFitness || 0).toFixed(4)}</span>
-            </div>
+      <section className="rounded-[28px] border border-[#d7cbbb] bg-[#fffef9] p-6 shadow-[0_18px_46px_-34px_rgba(44,31,17,0.42)]">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.32em] text-[#8a7b67]">Pipeline Atlas</p>
+            <h3 className="mt-2 font-serif text-[1.7rem] leading-none text-[#1d1710]">Map the algorithm to the run</h3>
           </div>
-
-          <div className="grid grid-cols-2 gap-2 text-[9px] py-1 border-b border-[#141414]/10 pb-3">
-            <div className="flex flex-col gap-1">
-              <span className="opacity-50 uppercase tracking-tighter">I(w) Informative</span>
-              <span className="font-bold">
-                {state.population?.length > 0 
-                  ? (state.population.find(p => Math.abs(p.fitness - state.bestFitness) < 0.0001) || state.population[0]).informativeScore.toFixed(4)
-                  : "0.0000"}
-              </span>
-            </div>
-            <div className="flex flex-col gap-1 text-right">
-              <span className="opacity-50 uppercase tracking-tighter">A(w) Authority</span>
-              <span className="font-bold">
-                {state.population?.length > 0 
-                  ? (state.population.find(p => Math.abs(p.fitness - state.bestFitness) < 0.0001) || state.population[0]).authorityScore.toFixed(4)
-                  : "0.0000"}
-              </span>
-            </div>
-          </div>
-
-          <div className="pt-2 flex justify-between items-center">
-            <span className="text-[8px] uppercase opacity-40">Algorithm Sequence</span>
-            <div className="flex gap-1">
-              <div className={`w-1.5 h-1.5 rounded-full ${state.status === 'searching' ? 'bg-blue-500 animate-pulse' : 'bg-[#141414]/20'}`} />
-              <div className={`w-1.5 h-1.5 rounded-full ${state.status === 'evolving' ? 'bg-purple-500 animate-pulse' : 'bg-[#141414]/20'}`} />
-              <div className={`w-1.5 h-1.5 rounded-full ${state.status === 'assembling' ? 'bg-green-500 animate-pulse' : 'bg-[#141414]/20'}`} />
-            </div>
-          </div>
+          <button
+            onClick={onToggleArtifacts}
+            className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[10px] uppercase tracking-[0.22em] transition ${showArtifacts ? 'border-[#1d1710] bg-[#1d1710] text-[#fffaf2]' : 'border-[#1d1710] text-[#1d1710] hover:bg-[#1d1710] hover:text-[#fffaf2]'}`}
+          >
+            <Layers size={12} />
+            {showArtifacts ? 'Hide Artifacts' : 'Show Artifacts'}
+          </button>
         </div>
+
+        <div className="mt-5 space-y-3" aria-live="polite">
+          {stages.map((stage) => {
+            const Icon = stage.icon;
+            const chipStatus = stage.state === 'active'
+              ? 'running'
+              : stage.state === 'complete'
+                ? 'complete'
+                : stage.state === 'error'
+                  ? 'error'
+                  : stage.state === 'queued'
+                    ? 'queued'
+                    : undefined;
+
+            return (
+              <article key={stage.key} className={`rounded-[22px] border p-4 ${stageTone(stage.state)}`}>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] text-[#8a7b67]"><Icon size={12} />{stage.label}</div>
+                    <p className="mt-3 text-sm leading-6 text-[#3e362b]">{stage.detail}</p>
+                    <div className="mt-3 text-[11px] text-[#5c5041]">{stage.metric}</div>
+                  </div>
+                  <span className={`rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] ${statusTone(chipStatus)}`}>
+                    {PIPELINE_STATUS_LABELS[stage.state]}
+                  </span>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          <div className="rounded-[18px] border border-[#e1d6c8] bg-[#fcf7ef] p-4"><div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Frontier</div><div className="mt-2 text-2xl font-semibold text-[#1d1710]">{frontierCount}</div></div>
+          <div className="rounded-[18px] border border-[#e1d6c8] bg-[#fcf7ef] p-4"><div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Evolved</div><div className="mt-2 text-2xl font-semibold text-[#1d1710]">{evolvedCount || state.population.length}</div></div>
+          <div className="rounded-[18px] border border-[#e1d6c8] bg-[#fcf7ef] p-4"><div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Chapters</div><div className="mt-2 text-2xl font-semibold text-[#1d1710]">{chapterCount}</div></div>
+          <div className="rounded-[18px] border border-[#e1d6c8] bg-[#fcf7ef] p-4"><div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Best Fitness</div><div className="mt-2 text-2xl font-semibold text-[#1d1710]">{bestFitness.toFixed(4)}</div></div>
+        </div>
+
+        {notice && (
+          <div className="mt-4 rounded-[18px] border border-[#efcc84] bg-[#fff7dd] px-4 py-3 text-sm leading-6 text-[#6d5312]">
+            <span className="inline-flex items-start gap-2"><Info size={14} className="mt-1 shrink-0" />{notice}</span>
+          </div>
+        )}
+
+        {error && (
+          <div className="mt-4 rounded-[18px] border border-[#efb8b8] bg-[#fff1f1] px-4 py-3 text-sm leading-6 text-[#7a2727]">
+            <span className="inline-flex items-start gap-2"><AlertCircle size={14} className="mt-1 shrink-0" />{error}</span>
+          </div>
+        )}
       </section>
 
-      {/* Artifacts Drawer Extension */}
       <AnimatePresence>
         {showArtifacts && (
           <motion.section
@@ -502,38 +479,64 @@ export function ControlSidebar({
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden"
           >
-            <div className="bg-[#141414] text-[#E4E3E0] p-6 border border-[#141414] shadow-[4px_4px_0px_0px_rgba(20,20,20,0.5)] space-y-6 font-mono text-[10px]">
-              <div className="flex items-center justify-between border-b border-white/10 pb-2">
-                <h3 className="uppercase font-bold tracking-widest flex items-center gap-2">
-                  <Cpu size={14} /> System Artifacts
-                </h3>
-                <button onClick={onToggleArtifacts} title="Close panel" className="hover:opacity-50">
+            <div className="rounded-[28px] border border-[#1d1710] bg-[#17120d] p-5 text-[#fffaf2]">
+              <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-3">
+                <div>
+                  <div className="text-[10px] uppercase tracking-[0.28em] text-[#c9baa7]">System Artifacts</div>
+                  <div className="mt-2 text-lg font-semibold">Frontier, ranked population, and assembly blueprint</div>
+                </div>
+                <button onClick={onToggleArtifacts} className="rounded-full border border-white/10 p-2 transition hover:bg-white/10">
                   <X size={14} />
                 </button>
               </div>
 
-              <div className="space-y-2">
-                <h4 className="text-green-400 uppercase font-bold border-l-2 border-green-400 pl-2">Evolutionary Population</h4>
-                {state.population && state.population.length > 0 ? (
-                  <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
-                    {state.population.map((genotype: WebPageGenotype, index: number) => (
-                      <div key={`${genotype.id}-${index}`} className="bg-white/5 p-2 border border-white/10 flex justify-between items-center">
-                        <div className="truncate flex-1 mr-4">
-                          <div className="font-bold text-white truncate">{genotype.title}</div>
-                          <div className="opacity-50 truncate text-[8px]">{genotype.url}</div>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <div className="text-green-400 font-bold">{(genotype.fitness || 0).toFixed(4)}</div>
-                          <div className="text-[8px] opacity-40">FITNESS</div>
+              <div className="mt-5 grid gap-5 text-[11px]">
+                <div>
+                  <div className="text-[10px] uppercase tracking-[0.24em] text-[#dbcdb9]">Search Frontier</div>
+                  <div className="mt-3 space-y-2">
+                    {artifacts.searchResults.slice(0, 5).map((result, index) => (
+                      <div key={`${result.id}-${index}`} className="rounded-[18px] border border-white/10 bg-white/5 p-3">
+                        <div className="font-semibold text-[#fffaf2]">{result.title}</div>
+                        <div className="mt-1 text-[10px] uppercase tracking-[0.2em] text-[#cabca8]">{summarizeProviders(result)}</div>
+                        <div className="mt-2 leading-5 text-[#e8dccb]">{result.content.slice(0, 160)}{result.content.length > 160 ? '...' : ''}</div>
+                      </div>
+                    ))}
+                    {artifacts.searchResults.length === 0 && <div className="rounded-[18px] border border-dashed border-white/15 px-4 py-3 text-[#cdbfae]">The first live evidence will appear here.</div>}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-[10px] uppercase tracking-[0.24em] text-[#dbcdb9]">Ranked Population</div>
+                  <div className="mt-3 space-y-2">
+                    {artifacts.evolvedPopulation.slice(0, 5).map((result, index) => (
+                      <div key={`${result.id}-${index}`} className="rounded-[18px] border border-white/10 bg-white/5 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="font-semibold text-[#fffaf2]">{result.title}</div>
+                            <div className="mt-1 text-[10px] uppercase tracking-[0.2em] text-[#cabca8]">{summarizeProviders(result)}</div>
+                          </div>
+                          <div className="text-right text-[#fffaf2]">{(result.fitness || 0).toFixed(4)}</div>
                         </div>
                       </div>
                     ))}
+                    {artifacts.evolvedPopulation.length === 0 && <div className="rounded-[18px] border border-dashed border-white/15 px-4 py-3 text-[#cdbfae]">Ranked source candidates will appear here after evolution starts.</div>}
                   </div>
-                ) : (
-                  <div className="opacity-30 italic">Evolution in progress or idle...</div>
-                )}
-              </div>
+                </div>
 
+                <div>
+                  <div className="text-[10px] uppercase tracking-[0.24em] text-[#dbcdb9]">Assembly Blueprint</div>
+                  <div className="mt-3 space-y-2">
+                    {artifacts.assembledBook?.chapters.slice(0, 6).map((chapter, index) => (
+                      <div key={`${chapter.id || chapter.title}-${index}`} className="rounded-[18px] border border-white/10 bg-white/5 p-3">
+                        <div className="font-semibold text-[#fffaf2]">{chapter.title}</div>
+                        <div className="mt-1 text-[10px] uppercase tracking-[0.2em] text-[#cabca8]">{chapter.sourceUrls.length} sources | {chapter.definitions.length} definitions</div>
+                        <div className="mt-2 leading-5 text-[#e8dccb]">{chapter.content.slice(0, 160)}{chapter.content.length > 160 ? '...' : ''}</div>
+                      </div>
+                    ))}
+                    {!artifacts.assembledBook && <div className="rounded-[18px] border border-dashed border-white/15 px-4 py-3 text-[#cdbfae]">Chapter structure appears here after assembly completes.</div>}
+                  </div>
+                </div>
+              </div>
             </div>
           </motion.section>
         )}

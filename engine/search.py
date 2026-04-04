@@ -46,6 +46,15 @@ def normalize_http_url(url: str) -> str:
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         return ""
 
+    try:
+        hostname = parsed.hostname
+        _ = parsed.port
+    except ValueError:
+        return ""
+
+    if not hostname or any(char in parsed.netloc for char in "()<>\"'"):
+        return ""
+
     return urllib.parse.urlunparse((
         parsed.scheme,
         parsed.netloc,
@@ -263,6 +272,56 @@ def _cached_normalize_space(text: Any) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _normalize_comparable_text(text: str) -> str:
+    normalized = _cached_normalize_space(html.unescape(str(text or ""))).lower().replace("&", " and ")
+    return re.sub(r"[^a-z0-9\s]", " ", normalized)
+
+
+def _calculate_text_similarity(left: str, right: str) -> float:
+    left_tokens = {token for token in _normalize_comparable_text(left).split() if len(token) >= 3}
+    right_tokens = {token for token in _normalize_comparable_text(right).split() if len(token) >= 3}
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens.intersection(right_tokens)) / max(len(left_tokens.union(right_tokens)), 1)
+
+
+def _split_search_sentences(text: str) -> List[str]:
+    normalized = _cached_normalize_space(text)
+    if not normalized:
+        return []
+    sentences = [segment.strip() for segment in re.split(r"(?<=[.!?])\s+", normalized) if segment.strip()]
+    return sentences or [normalized]
+
+
+def sanitize_search_snippet(text: str) -> str:
+    cleaned = _cached_normalize_space(re.sub(r"\.\.\.\s*(?=[A-Z])", " ", text or ""))
+    unique: List[str] = []
+    for sentence in _split_search_sentences(cleaned):
+        if len(sentence) < 35:
+            continue
+        if any(_calculate_text_similarity(existing, sentence) >= 0.88 for existing in unique):
+            continue
+        unique.append(sentence)
+        if len(unique) >= 4:
+            break
+    return " ".join(unique) if unique else cleaned
+
+
+def _merge_evidence_text(snippet: str, page_content: str, *, max_chars: int = 2200) -> str:
+    merged: List[str] = []
+    for block in (sanitize_search_snippet(snippet), _cached_normalize_space(page_content)):
+        for sentence in _split_search_sentences(block):
+            if not sentence:
+                continue
+            if any(_calculate_text_similarity(existing, sentence) >= 0.9 for existing in merged):
+                continue
+            candidate = " ".join(merged + [sentence])
+            if merged and len(candidate) > max_chars:
+                return " ".join(merged)[:max_chars]
+            merged.append(sentence)
+    return (" ".join(merged) if merged else _cached_normalize_space(page_content or snippet))[:max_chars]
+
+
 @lru_cache(maxsize=96)
 def _cached_wikipedia_lookup(
     query: str,
@@ -452,7 +511,7 @@ def search_duckduckgo(
             continue
 
         seen_urls.add(url)
-        content = normalize_space(f"{title}. {snippet}") if snippet else title
+        content = normalize_space(f"{title}. {sanitize_search_snippet(snippet)}") if snippet else title
         if not content or len(content) < 30:
             continue
 
@@ -510,7 +569,7 @@ def search_bing(
             continue
 
         seen_urls.add(url)
-        content = normalize_space(f"{title}. {snippet}") if snippet else title
+        content = normalize_space(f"{title}. {sanitize_search_snippet(snippet)}") if snippet else title
         if not content or len(content) < 30:
             continue
 
@@ -593,7 +652,7 @@ def search_google(
             continue
 
         seen_urls.add(url)
-        content = normalize_space(f"{title}. {snippet}") if snippet else title
+        content = normalize_space(f"{title}. {sanitize_search_snippet(snippet)}") if snippet else title
         if not content or len(content) < 30:
             continue
 
@@ -608,6 +667,269 @@ def search_google(
             break
 
     return results
+
+
+def _read_json_response(
+    url: str,
+    headers: Dict[str, str],
+    timeout: int,
+) -> Dict[str, Any]:
+    request = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        decoded = _decode_html_bytes(response.read(), response.headers.get("Content-Type", ""))
+    return json.loads(decoded)
+
+
+def _normalize_description_value(value: Any) -> str:
+    if isinstance(value, dict):
+        return _cached_normalize_space(value.get("value") or value.get("description") or "")
+    if isinstance(value, list):
+        return " ".join(_normalize_description_value(item) for item in value if _normalize_description_value(item))
+    return _cached_normalize_space(strip_tags(html.unescape(str(value or ""))))
+
+
+def _format_metadata_list(items: Sequence[Any], *, limit: int = 6) -> str:
+    values: List[str] = []
+    seen = set()
+    for item in items or []:
+        normalized = _cached_normalize_space(str(item or ""))
+        key = normalized.lower()
+        if not normalized or key in seen:
+            continue
+        seen.add(key)
+        values.append(normalized)
+        if len(values) >= limit:
+            break
+    return ", ".join(values)
+
+
+def _build_metadata_excerpt(
+    blocks: Sequence[str],
+    *,
+    max_chars: int = 2200,
+) -> str:
+    merged: List[str] = []
+    for block in blocks:
+        normalized_block = _cached_normalize_space(block)
+        if not normalized_block:
+            continue
+        for sentence in _split_search_sentences(normalized_block):
+            if any(_calculate_text_similarity(existing, sentence) >= 0.9 for existing in merged):
+                continue
+            candidate = " ".join(merged + [sentence])
+            if merged and len(candidate) > max_chars:
+                return " ".join(merged)[:max_chars]
+            merged.append(sentence)
+    return (" ".join(merged) if merged else "")[:max_chars]
+
+
+def _extract_crossref_year(item: Dict[str, Any]) -> str:
+    for key in ("published-print", "published-online", "issued", "created", "deposited"):
+        date_parts = item.get(key, {}).get("date-parts")
+        if isinstance(date_parts, list) and date_parts and isinstance(date_parts[0], list) and date_parts[0]:
+            return str(date_parts[0][0])
+    return ""
+
+
+def _format_crossref_authors(authors: Sequence[Dict[str, Any]], *, limit: int = 4) -> str:
+    names: List[str] = []
+    for author in authors or []:
+        given = _cached_normalize_space(author.get("given", ""))
+        family = _cached_normalize_space(author.get("family", ""))
+        name = _cached_normalize_space(f"{given} {family}")
+        if name:
+            names.append(name)
+        if len(names) >= limit:
+            break
+    return ", ".join(names)
+
+
+def search_openlibrary(
+    query: str,
+    headers: Dict[str, str],
+    limit: int = 5,
+    *,
+    normalize_space: Callable[[Any], str],
+    search_request_timeout: int,
+    debug: Callable[[str], None],
+) -> List[Dict[str, Any]]:
+    params = urllib.parse.urlencode({
+        "q": query,
+        "limit": max(limit * 4, 16),
+    })
+    api_headers = {
+        "User-Agent": headers.get("User-Agent", "Mozilla/5.0"),
+        "Accept-Language": headers.get("Accept-Language", "en-US,en;q=0.9"),
+        "Accept": "application/json",
+    }
+
+    try:
+        data = _read_json_response(f"https://openlibrary.org/search.json?{params}", api_headers, search_request_timeout)
+    except Exception as error:
+        debug(f"Open Library fetch failed: {error}")
+        return []
+
+    docs = data.get("docs", []) or []
+    detail_cache: Dict[str, Dict[str, Any]] = {}
+    candidates: List[tuple[float, Dict[str, Any]]] = []
+
+    for doc in docs:
+        key = str(doc.get("key", "") or "")
+        if not key.startswith("/works/"):
+            continue
+
+        if key not in detail_cache:
+            try:
+                detail_cache[key] = _read_json_response(
+                    f"https://openlibrary.org{key}.json",
+                    api_headers,
+                    search_request_timeout,
+                )
+            except Exception:
+                detail_cache[key] = {}
+
+        detail = detail_cache.get(key, {})
+        title = normalize_space(" ".join(part for part in [doc.get("title", ""), doc.get("subtitle", "")] if part))
+        authors = _format_metadata_list(doc.get("author_name", []) or [], limit=3)
+        subjects = _format_metadata_list((detail.get("subjects") or doc.get("subject") or []), limit=6)
+        description = _normalize_description_value(detail.get("description", ""))
+        year = doc.get("first_publish_year")
+
+        metadata_sentences = []
+        if authors:
+            metadata_sentences.append(f"By {authors}.")
+        if year:
+            metadata_sentences.append(f"First published {year}.")
+        if subjects:
+            metadata_sentences.append(f"Subjects include {subjects}.")
+
+        content = _build_metadata_excerpt([
+            description,
+            f"{title}." if title and not description else "",
+            *metadata_sentences,
+        ])
+        if len(content) < 70:
+            continue
+
+        relevance = _calculate_text_similarity(query, f"{title} {content}")
+        richness = (0.14 if description else 0.0) + (0.06 if authors else 0.0) + (0.08 if subjects else 0.0)
+        informative_score = min(0.92, 0.58 + richness + min(len(content) / 2200.0, 0.12))
+        authority_score = 0.86 if description else 0.8
+        candidates.append((
+            relevance + richness,
+            {
+                "url": f"https://openlibrary.org{key}",
+                "title": title or normalize_space(doc.get("title", "")) or "Open Library Result",
+                "content": content,
+                "informativeScore": round(informative_score, 4),
+                "authorityScore": round(authority_score, 4),
+                "searchProvider": "openlibrary",
+            },
+        ))
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return [result for _, result in candidates[:limit]]
+
+
+def search_crossref(
+    query: str,
+    headers: Dict[str, str],
+    limit: int = 5,
+    *,
+    normalize_space: Callable[[Any], str],
+    search_request_timeout: int,
+    debug: Callable[[str], None],
+    contact_email: str = "",
+) -> List[Dict[str, Any]]:
+    params = {
+        "rows": max(limit * 4, 20),
+        "query.bibliographic": query,
+        "select": "DOI,URL,title,author,abstract,subject,container-title,publisher,type,published-print,published-online,issued,created",
+    }
+    if contact_email:
+        params["mailto"] = contact_email
+    api_headers = {
+        "User-Agent": headers.get("User-Agent", "Mozilla/5.0"),
+        "Accept-Language": headers.get("Accept-Language", "en-US,en;q=0.9"),
+        "Accept": "application/json",
+    }
+
+    try:
+        data = _read_json_response(
+            f"https://api.crossref.org/works?{urllib.parse.urlencode(params)}",
+            api_headers,
+            search_request_timeout,
+        )
+    except Exception as error:
+        debug(f"Crossref fetch failed: {error}")
+        return []
+
+    items = data.get("message", {}).get("items", []) or []
+    candidates: List[tuple[float, Dict[str, Any]]] = []
+
+    for item in items:
+        titles = item.get("title") or []
+        title = normalize_space(titles[0] if titles else "")
+        if not title:
+            continue
+
+        abstract = _normalize_description_value(item.get("abstract", ""))
+        container = _format_metadata_list(item.get("container-title", []) or [], limit=2)
+        authors = _format_crossref_authors(item.get("author", []) or [])
+        subjects = _format_metadata_list(item.get("subject", []) or [], limit=5)
+        publisher = normalize_space(item.get("publisher", ""))
+        work_type = normalize_space(str(item.get("type", "") or "").replace("-", " "))
+        year = _extract_crossref_year(item)
+
+        metadata_sentences = []
+        if authors:
+            metadata_sentences.append(f"Authors: {authors}.")
+        if container:
+            metadata_sentences.append(f"Published in {container}.")
+        if publisher:
+            metadata_sentences.append(f"Publisher: {publisher}.")
+        if subjects:
+            metadata_sentences.append(f"Subjects include {subjects}.")
+        if work_type:
+            metadata_sentences.append(f"Work type: {work_type}.")
+        if year:
+            metadata_sentences.append(f"Year: {year}.")
+
+        content = _build_metadata_excerpt([
+            abstract,
+            f"{title}." if title and not abstract else "",
+            *metadata_sentences,
+        ])
+        if len(content) < 80:
+            continue
+
+        relevance = _calculate_text_similarity(query, f"{title} {content}")
+        abstract_bonus = 0.16 if abstract else 0.0
+        metadata_bonus = (0.07 if subjects else 0.0) + (0.05 if container else 0.0) + (0.04 if authors else 0.0)
+        if relevance < 0.08 and not abstract:
+            continue
+
+        doi = normalize_space(item.get("DOI", ""))
+        url = normalize_http_url(item.get("URL", "")) or (normalize_http_url(f"https://doi.org/{doi}") if doi else "")
+        if not url:
+            continue
+
+        informative_score = min(0.94, 0.6 + abstract_bonus + metadata_bonus + min(len(content) / 2200.0, 0.1))
+        authority_score = 0.9 if abstract else 0.84
+        candidates.append((
+            relevance + abstract_bonus + metadata_bonus,
+            {
+                "url": url,
+                "title": title,
+                "content": content,
+                "informativeScore": round(informative_score, 4),
+                "authorityScore": round(authority_score, 4),
+                "searchProvider": "crossref",
+            },
+        ))
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return [result for _, result in candidates[:limit]]
 
 
 def fetch_manual_sources(
@@ -652,17 +974,21 @@ def run_provider_searches(
     *,
     headers: Dict[str, str],
     search_wikipedia_fn: Callable[[str, Dict[str, str], int], List[Dict[str, Any]]],
+    search_openlibrary_fn: Callable[[str, Dict[str, str], int], List[Dict[str, Any]]],
+    search_crossref_fn: Callable[[str, Dict[str, str], int], List[Dict[str, Any]]],
     search_duckduckgo_fn: Callable[[str, Dict[str, str], int], List[Dict[str, Any]]],
     search_google_fn: Callable[[str, Dict[str, str], int], List[Dict[str, Any]]],
     search_bing_fn: Callable[[str, Dict[str, str], int], List[Dict[str, Any]]],
     debug: Callable[[str], None],
 ) -> List[List[Dict[str, Any]]]:
     provider_results: List[List[Dict[str, Any]]] = []
-    for provider_name, search_fn in (
-        ("wikipedia", search_wikipedia_fn),
-        ("duckduckgo", search_duckduckgo_fn),
-        ("google", search_google_fn),
-        ("bing", search_bing_fn),
+    for provider_name, provider_label, search_fn in (
+        ("wikipedia", "Wikipedia", search_wikipedia_fn),
+        ("openlibrary", "Open Library", search_openlibrary_fn),
+        ("crossref", "Crossref", search_crossref_fn),
+        ("duckduckgo", "DuckDuckGo", search_duckduckgo_fn),
+        ("google", "Google", search_google_fn),
+        ("bing", "Bing", search_bing_fn),
     ):
         if not source_selection.get(provider_name):
             provider_results.append([])
@@ -670,10 +996,10 @@ def run_provider_searches(
 
         try:
             results = search_fn(query, headers, 5)
-            debug(f"{provider_name.title()} returned {len(results)} results")
+            debug(f"{provider_label} returned {len(results)} results")
             provider_results.append(results)
         except Exception as error:
-            debug(f"{provider_name.title()} failed: {error}")
+            debug(f"{provider_label} failed: {error}")
             provider_results.append([])
 
     return provider_results
@@ -936,6 +1262,64 @@ def should_supplement_with_fallback(
     }
 
 
+def enrich_frontier_results(
+    results: Sequence[Dict[str, Any]],
+    query: str,
+    *,
+    headers: Dict[str, str],
+    fetch_page_document_fn: Callable[..., Dict[str, Any]],
+    query_words: Callable[[str], set[str]],
+    expand_query_focus_words: Callable[[set[str]], set[str]],
+    tokenize: Callable[[str], Sequence[str]],
+    normalize_space: Callable[[Any], str],
+    source_relevance: Callable[[Dict[str, Any], set[str]], float],
+    debug: Callable[[str], None],
+    limit: int = 8,
+) -> List[Dict[str, Any]]:
+    if not results:
+        return list(results)
+    ranked = rank_frontier_results(results, query, query_words=query_words, expand_query_focus_words=expand_query_focus_words, tokenize=tokenize, normalize_space=normalize_space, source_relevance=source_relevance)
+    updates: Dict[str, Dict[str, Any]] = {}
+    for result in ranked:
+        providers = [normalize_space(provider).lower() for provider in (result.get("searchProviders", []) or []) if normalize_space(provider)]
+        primary = normalize_space(result.get("searchProvider", "")).lower()
+        if primary and primary not in providers:
+            providers.insert(0, primary)
+        url = normalize_http_url(result.get("url", "")) or _cached_normalize_space(result.get("url", "")).lower()
+        content = normalize_space(result.get("content", ""))
+        if not url or url in updates or not can_fetch_page(url) or result.get("_isFallback"):
+            continue
+        if {"manual", "wikipedia", "openlibrary", "crossref"}.intersection(providers):
+            continue
+        if len(content) >= 820 and len(_split_search_sentences(content)) >= 5:
+            continue
+        if len(updates) >= limit:
+            break
+        try:
+            document = fetch_page_document_fn(url, headers, max_chars=2200)
+        except TypeError:
+            document = fetch_page_document_fn(url, headers)
+        except Exception as error:
+            debug(f"Page enrichment failed for {url}: {error}")
+            continue
+        page_content = normalize_space((document or {}).get("content", ""))
+        if not page_content:
+            continue
+        merged = _merge_evidence_text(content, page_content, max_chars=2200)
+        if len(merged) <= len(content) + 40:
+            continue
+        updated = dict(result)
+        updated["content"] = merged
+        if "page-fetch" not in providers:
+            providers.append("page-fetch")
+        updated["searchProviders"] = providers
+        updates[url] = updated
+    if not updates:
+        return list(results)
+    debug(f"Enriched {len(updates)} frontier results with direct page excerpts")
+    return [dict(updates.get(normalize_http_url(result.get("url", "")) or _cached_normalize_space(result.get("url", "")).lower(), result)) for result in results]
+
+
 def search_web_results(
     query: str,
     source_config: Any = None,
@@ -953,6 +1337,7 @@ def search_web_results(
     results_miss_query_focus: Callable[[str, Sequence[Dict[str, Any]], set], bool],
     build_adaptive_fallback_results: Callable[[str, Sequence[Dict[str, Any]], int], Sequence[Dict[str, Any]]],
     choose_user_agent: Callable[[], str],
+    fetch_page_document: Callable[..., Dict[str, Any]],
     debug: Callable[[str], None],
 ) -> Sequence[Dict[str, Any]]:
     normalized_source_config = normalize_source_config(source_config)
@@ -1007,6 +1392,23 @@ def search_web_results(
                 )
             normalized_results = filtered_results
 
+    if normalized_results:
+        normalized_results = list(dedupe_results(
+            enrich_frontier_results(
+                normalized_results,
+                query,
+                headers=build_search_headers(choose_user_agent=choose_user_agent),
+                fetch_page_document_fn=fetch_page_document,
+                query_words=query_words,
+                expand_query_focus_words=expand_query_focus_words,
+                tokenize=tokenize,
+                normalize_space=normalize_space,
+                source_relevance=source_relevance,
+                debug=debug,
+            ),
+            query,
+        ))
+
     ranked_results = rank_frontier_results(
         normalized_results,
         query,
@@ -1015,7 +1417,7 @@ def search_web_results(
         tokenize=tokenize,
         normalize_space=normalize_space,
         source_relevance=source_relevance,
-    )[:18]
+    )[:24]
 
     fallback_decision = should_supplement_with_fallback(
         ranked_results,
@@ -1046,4 +1448,4 @@ def search_web_results(
         tokenize=tokenize,
         normalize_space=normalize_space,
         source_relevance=source_relevance,
-    )[:18]
+    )[:24]
