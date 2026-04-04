@@ -31,6 +31,8 @@ class SearchNormalizeTests(unittest.TestCase):
 
         self.assertFalse(normalized["sources"]["wikipedia"])
         self.assertTrue(normalized["sources"]["google"])
+        self.assertFalse(normalized["sources"]["openlibrary"])
+        self.assertFalse(normalized["sources"]["crossref"])
         self.assertTrue(normalized["disableMockFallback"])
         self.assertEqual(8, len(normalized["manualUrls"]))
         self.assertEqual("https://example.com/a", normalized["manualUrls"][0])

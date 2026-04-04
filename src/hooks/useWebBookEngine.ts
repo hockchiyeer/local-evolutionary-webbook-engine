@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import type { 
   SearchExecutionMode, SearchSourceConfig, SearchSourceKey, 
   SourceReference, WebBook, WebPageGenotype, EvolutionState 
@@ -39,6 +39,8 @@ export const SOURCE_PORTAL_STORAGE_KEY = "webbook_source_config";
 export const DEFAULT_SOURCE_CONFIG: SearchSourceConfig = {
   sources: {
     wikipedia: true,
+    openlibrary: true,
+    crossref: true,
     duckduckgo: true,
     google: true,
     bing: true,
@@ -67,32 +69,51 @@ export const EXECUTION_MODE_CARDS: Array<{
 export const SOURCE_PORTAL_CARDS: Array<{
   key: SearchSourceKey;
   label: string;
+  category: string;
   description: string;
   usage: string;
 }> = [
   {
     key: "wikipedia",
     label: "Wikipedia",
-    description: "Primary encyclopedic anchor enriched by local TF-IDF and LSA filtering.",
-    usage: "Best for grounded topic overviews, entities, timelines, and reliable conceptual scaffolding.",
+    category: "Encyclopedic anchor",
+    description: "Structured topic lookup with page extracts that give the frontier a grounded starting frame.",
+    usage: "Best for entities, timelines, historical framing, and broad conceptual orientation.",
+  },
+  {
+    key: "openlibrary",
+    label: "Open Library",
+    category: "Book metadata",
+    description: "Public book, author, and subject metadata pulled from Open Library's official web APIs.",
+    usage: "Useful when the topic has a strong book, author, subject, or publishing footprint.",
+  },
+  {
+    key: "crossref",
+    label: "Crossref",
+    category: "Scholarly metadata",
+    description: "Official Crossref metadata retrieval for research-heavy topics, abstracts, journals, and proceedings.",
+    usage: "Strong for academic, technical, standards, and evidence-oriented queries.",
   },
   {
     key: "duckduckgo",
     label: "DuckDuckGo",
-    description: "Broad public-web discovery with lightweight result extraction.",
-    usage: "Use it to widen coverage across blogs, articles, and public websites beyond encyclopedic summaries.",
+    category: "Public web",
+    description: "Broad public-web discovery with lightweight snippet extraction and later page-excerpt enrichment.",
+    usage: "Good for widening coverage across articles, explainers, blogs, and public websites.",
   },
   {
     key: "google",
     label: "Google",
-    description: "Additional web-result coverage when publicly accessible.",
-    usage: "Turn it on when you want extra result diversity and broader web discovery for the topic.",
+    category: "Public web",
+    description: "Additional public-web coverage when directly accessible from the local runtime environment.",
+    usage: "Useful when you want extra ranking diversity and more candidate landing pages.",
   },
   {
     key: "bing",
     label: "Bing",
-    description: "Alternative ranking and source diversity from another engine.",
-    usage: "Useful for another ranking perspective when you want more varied public-web sources.",
+    category: "Public web",
+    description: "Alternative ranking and source discovery pass from another search engine index.",
+    usage: "Helpful for a second web-search perspective and source diversity.",
   },
 ];
 
@@ -125,13 +146,15 @@ export const sanitizeSourceConfig = (value: unknown): SearchSourceConfig => {
   const candidate = value as Partial<SearchSourceConfig>;
   const rawSources = candidate.sources;
   const manualUrls = Array.isArray(candidate.manualUrls)
-    ? Array.from(new Set(candidate.manualUrls.map((url) => normalizeManualUrl(String(url))).filter(Boolean))).slice(0, 8)
+    ? Array.from(new Set(candidate.manualUrls.map((url) => normalizeManualUrl(String(url))).filter(Boolean))).slice(0, 12)
     : [];
   const executionMode = candidate.executionMode === "parallel" ? "parallel" : DEFAULT_SOURCE_CONFIG.executionMode;
 
   return {
     sources: {
       wikipedia: typeof rawSources?.wikipedia === "boolean" ? rawSources.wikipedia : DEFAULT_SOURCE_CONFIG.sources.wikipedia,
+      openlibrary: typeof rawSources?.openlibrary === "boolean" ? rawSources.openlibrary : DEFAULT_SOURCE_CONFIG.sources.openlibrary,
+      crossref: typeof rawSources?.crossref === "boolean" ? rawSources.crossref : DEFAULT_SOURCE_CONFIG.sources.crossref,
       duckduckgo: typeof rawSources?.duckduckgo === "boolean" ? rawSources.duckduckgo : DEFAULT_SOURCE_CONFIG.sources.duckduckgo,
       google: typeof rawSources?.google === "boolean" ? rawSources.google : DEFAULT_SOURCE_CONFIG.sources.google,
       bing: typeof rawSources?.bing === "boolean" ? rawSources.bing : DEFAULT_SOURCE_CONFIG.sources.bing,
@@ -141,11 +164,49 @@ export const sanitizeSourceConfig = (value: unknown): SearchSourceConfig => {
   };
 };
 
+const fallbackProviderDescriptor = (provider: string) => ({
+  label: provider.charAt(0).toUpperCase() + provider.slice(1),
+  category: "Supplemental",
+  description: "Auxiliary stage generated by the local engine.",
+});
+
+export const getProviderDescriptor = (provider: string) => {
+  const builtInCard = SOURCE_PORTAL_CARDS.find((card) => card.key === provider);
+  if (builtInCard) {
+    return {
+      label: builtInCard.label,
+      category: builtInCard.category,
+      description: builtInCard.description,
+    };
+  }
+
+  switch (provider) {
+    case "manual":
+      return {
+        label: "Manual URLs",
+        category: "Direct pages",
+        description: "User-supplied pages fetched directly into the search frontier.",
+      };
+    case "local-synthesis":
+      return {
+        label: "Local Synthesis",
+        category: "Fallback layer",
+        description: "Adaptive local fallback used when live retrieval yields no viable frontier.",
+      };
+    default:
+      return fallbackProviderDescriptor(provider);
+  }
+};
+
 export interface ArtifactProviderStatus {
   provider: SearchBatchProvider;
   label: string;
+  category: string;
+  description: string;
   status: 'queued' | 'running' | 'complete' | 'error';
   resultCount: number;
+  frontierCount: number;
+  durationMs: number | null;
   error: string | null;
 }
 
@@ -175,24 +236,7 @@ export const EMPTY_ARTIFACTS: ArtifactsState = {
   providerStatuses: [],
 };
 
-export const getProviderLabel = (provider: string) => {
-  switch (provider) {
-    case "wikipedia":
-      return "Hybrid Wikipedia API";
-    case "duckduckgo":
-      return "DuckDuckGo";
-    case "google":
-      return "Google";
-    case "bing":
-      return "Bing";
-    case "manual":
-      return "Manual";
-    case "local-synthesis":
-      return "Local Synthesis";
-    default:
-      return provider.charAt(0).toUpperCase() + provider.slice(1);
-  }
-};
+export const getProviderLabel = (provider: string) => getProviderDescriptor(provider).label;
 
 export const buildArtifactProviderStatuses = (config: SearchSourceConfig): ArtifactProviderStatus[] => {
   const statuses = SOURCE_PORTAL_CARDS
@@ -200,21 +244,30 @@ export const buildArtifactProviderStatuses = (config: SearchSourceConfig): Artif
     .map((card, index) => ({
       provider: card.key as SearchBatchProvider,
       label: card.label,
+      category: card.category,
+      description: card.description,
       status: config.executionMode === 'parallel'
         ? 'running' as const
         : (index === 0 ? 'running' as const : 'queued' as const),
       resultCount: 0,
+      frontierCount: 0,
+      durationMs: null,
       error: null,
     }));
 
   if (config.manualUrls.length > 0) {
+    const descriptor = getProviderDescriptor("manual");
     statuses.push({
       provider: 'manual',
-      label: 'Manual',
+      label: descriptor.label,
+      category: descriptor.category,
+      description: descriptor.description,
       status: config.executionMode === 'parallel'
         ? 'running'
         : (statuses.length === 0 ? 'running' : 'queued'),
       resultCount: 0,
+      frontierCount: 0,
+      durationMs: null,
       error: null,
     });
   }
@@ -234,6 +287,7 @@ export const applySearchProgressToStatuses = (
       nextStatuses[providerIndex] = {
         ...nextStatuses[providerIndex],
         status: 'running',
+        frontierCount: progress.mergedResults.length,
         error: null,
       };
     }
@@ -245,14 +299,21 @@ export const applySearchProgressToStatuses = (
       ...nextStatuses[providerIndex],
       status: progress.error ? 'error' : 'complete',
       resultCount: progress.batchResults.length,
+      frontierCount: progress.mergedResults.length,
+      durationMs: progress.durationMs ?? nextStatuses[providerIndex].durationMs,
       error: progress.error || null,
     };
   } else {
+    const descriptor = getProviderDescriptor(progress.provider);
     nextStatuses.push({
       provider: progress.provider,
-      label: getProviderLabel(progress.provider),
+      label: descriptor.label,
+      category: descriptor.category,
+      description: descriptor.description,
       status: progress.error ? 'error' : 'complete',
       resultCount: progress.batchResults.length,
+      frontierCount: progress.mergedResults.length,
+      durationMs: progress.durationMs ?? null,
       error: progress.error || null,
     });
   }
@@ -330,6 +391,8 @@ export function useWebBookEngine() {
       ...current,
       sources: {
         wikipedia: enabled,
+        openlibrary: enabled,
+        crossref: enabled,
         duckduckgo: enabled,
         google: enabled,
         bing: enabled,
@@ -354,7 +417,7 @@ export function useWebBookEngine() {
 
     setSourceConfig((current) => ({
       ...current,
-      manualUrls: Array.from(new Set([...current.manualUrls, ...extractedUrls])).slice(0, 8),
+      manualUrls: Array.from(new Set([...current.manualUrls, ...extractedUrls])).slice(0, 12),
     }));
     setManualSourceInput('');
     setError(null);
@@ -385,6 +448,18 @@ export function useWebBookEngine() {
   const viewHistoryItem = (item: WebBook) => {
     setWebBook(item);
     setQuery(item.topic);
+    setArtifacts({
+      status: 'complete',
+      query: item.topic,
+      sourceConfig,
+      searchResults: [],
+      evolvedPopulation: [],
+      assembledBook: item,
+      startedAt: item.timestamp,
+      updatedAt: item.timestamp,
+      error: null,
+      providerStatuses: [],
+    });
     setState({
       generation: 3,
       population: [],
@@ -416,7 +491,13 @@ export function useWebBookEngine() {
     }
 
     const runStartedAt = Date.now();
-    setState({ ...state, status: 'searching', generation: 0, population: [] });
+    setState((current) => ({
+      ...current,
+      status: 'searching',
+      generation: 0,
+      population: [],
+      bestFitness: 0,
+    }));
     setWebBook(null);
     setError(null);
     setArtifacts({
@@ -455,8 +536,16 @@ export function useWebBookEngine() {
         throw new Error("No initial data found for the query.");
       }
       
-      setState(s => ({ ...s, status: 'evolving', population: initialPopulation }));
+      setState(() => ({
+        status: 'evolving',
+        generation: 1,
+        population: initialPopulation,
+        bestFitness: 0,
+      }));
       const evolvedPopulation = await evolve(initialPopulation, trimmedQuery);
+      const bestFitness = evolvedPopulation.length > 0
+        ? Math.max(...evolvedPopulation.map((candidate: WebPageGenotype) => candidate.fitness || 0))
+        : 0;
       setArtifacts((current) => ({
         ...current,
         status: 'assembling',
@@ -465,7 +554,12 @@ export function useWebBookEngine() {
         updatedAt: Date.now(),
       }));
       
-      setState(s => ({ ...s, status: 'assembling', population: evolvedPopulation }));
+      setState(() => ({
+        status: 'assembling',
+        generation: 2,
+        population: evolvedPopulation,
+        bestFitness,
+      }));
       const book = await assembleWebBook(evolvedPopulation, trimmedQuery);
       setArtifacts((current) => ({
         ...current,
@@ -483,7 +577,7 @@ export function useWebBookEngine() {
         status: 'complete',
         generation: 3,
         population: evolvedPopulation,
-        bestFitness: Math.max(...evolvedPopulation.map((p: any) => p.fitness || 0))
+        bestFitness,
       });
     } catch (err: any) {
       console.error("Evolution error:", err);
@@ -498,7 +592,7 @@ export function useWebBookEngine() {
         updatedAt: Date.now(),
         error: message,
       }));
-      setState({ ...state, status: 'idle' });
+      setState((current) => ({ ...current, status: 'idle' }));
     }
   };
 

@@ -31,7 +31,7 @@ def normalize_source_config(
 
     return {
         "sources": normalized_sources,
-        "manualUrls": manual_urls[:8],
+        "manualUrls": manual_urls[:12],
         "disableMockFallback": disable_mock_fallback,
     }
 
@@ -106,7 +106,7 @@ def normalize_result(
     normalized_result = {
         "url": url,
         "title": title,
-        "content": content[:2600],
+        "content": content[:3200],
         "informativeScore": informative_score,
         "authorityScore": authority_score,
         "definitions": definitions,

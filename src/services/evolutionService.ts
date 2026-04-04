@@ -9,6 +9,7 @@ export interface SearchProgressUpdate {
   mergedResults: WebPageGenotype[];
   completed: number;
   total: number;
+  durationMs?: number;
   error?: string;
 }
 
@@ -18,6 +19,8 @@ type SearchRequestConfig = SearchSourceConfig & {
 
 const EMPTY_SOURCE_SELECTION = {
   wikipedia: false,
+  openlibrary: false,
+  crossref: false,
   duckduckgo: false,
   google: false,
   bing: false,
@@ -25,6 +28,8 @@ const EMPTY_SOURCE_SELECTION = {
 
 const SEARCH_PROVIDER_ORDER: SearchSourceKey[] = [
   "wikipedia",
+  "openlibrary",
+  "crossref",
   "duckduckgo",
   "google",
   "bing",
@@ -70,17 +75,18 @@ async function readResponseBody(response: Response) {
   }
 }
 
-const MIN_REQUEST_TIMEOUT_MS = 180000;
+const SEARCH_REQUEST_TIMEOUT_MS = 420000;
+const PROCESS_REQUEST_TIMEOUT_MS = 480000;
 
 const ENDPOINT_TIMEOUT_MS: Record<string, number> = {
-  search: MIN_REQUEST_TIMEOUT_MS,
-  evolve: 300000,
-  assemble: 300000,
+  search: SEARCH_REQUEST_TIMEOUT_MS,
+  evolve: PROCESS_REQUEST_TIMEOUT_MS,
+  assemble: PROCESS_REQUEST_TIMEOUT_MS,
 };
 
 async function callApi(endpoint: string, body: any) {
   const controller = new AbortController();
-  const timeoutMs = ENDPOINT_TIMEOUT_MS[endpoint] ?? MIN_REQUEST_TIMEOUT_MS;
+  const timeoutMs = ENDPOINT_TIMEOUT_MS[endpoint] ?? SEARCH_REQUEST_TIMEOUT_MS;
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
 
   let response: Response;
@@ -198,7 +204,7 @@ function normalizeSearchResult(rawResult: any, index: number): WebPageGenotype {
     id: `gen-${Date.now()}-${index}`,
     url: rawResult.url || "",
     title: rawResult.title || "Untitled Source",
-    content: rawResult.content ? String(rawResult.content).substring(0, 2400) : "",
+    content: rawResult.content ? String(rawResult.content).substring(0, 3000) : "",
     definitions: (rawResult.definitions || []).map((definition: any) => ({
       ...definition,
       sourceUrl: definition.sourceUrl || rawResult.url || "",
@@ -316,6 +322,7 @@ export async function searchAndExtract(
   const errors: string[] = [];
 
   const runBatch = async (provider: SearchBatchProvider, config: SearchRequestConfig) => {
+    const startedAt = Date.now();
     onProgress?.({
       provider,
       phase: "started",
@@ -323,6 +330,7 @@ export async function searchAndExtract(
       mergedResults,
       completed,
       total: batchConfigs.length,
+      durationMs: 0,
     });
 
     try {
@@ -336,6 +344,7 @@ export async function searchAndExtract(
         mergedResults,
         completed,
         total: batchConfigs.length,
+        durationMs: Date.now() - startedAt,
       });
     } catch (error: any) {
       completed += 1;
@@ -348,6 +357,7 @@ export async function searchAndExtract(
         mergedResults,
         completed,
         total: batchConfigs.length,
+        durationMs: Date.now() - startedAt,
         error: message,
       });
     }
@@ -362,6 +372,7 @@ export async function searchAndExtract(
   }
 
   if (mergedResults.length === 0) {
+    const fallbackStartedAt = Date.now();
     const fallbackResults = await runSearchBatch(query, {
       sources: { ...EMPTY_SOURCE_SELECTION },
       manualUrls: [],
@@ -377,6 +388,7 @@ export async function searchAndExtract(
         mergedResults,
         completed,
         total: batchConfigs.length,
+        durationMs: Date.now() - fallbackStartedAt,
         error: errors.length > 0 ? Array.from(new Set(errors)).join(" | ") : undefined,
       });
     }
