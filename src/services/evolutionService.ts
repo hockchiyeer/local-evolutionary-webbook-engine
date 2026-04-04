@@ -198,7 +198,7 @@ function normalizeSearchResult(rawResult: any, index: number): WebPageGenotype {
     id: `gen-${Date.now()}-${index}`,
     url: rawResult.url || "",
     title: rawResult.title || "Untitled Source",
-    content: rawResult.content ? String(rawResult.content).substring(0, 1800) : "",
+    content: rawResult.content ? String(rawResult.content).substring(0, 2400) : "",
     definitions: (rawResult.definitions || []).map((definition: any) => ({
       ...definition,
       sourceUrl: definition.sourceUrl || rawResult.url || "",

@@ -39,9 +39,9 @@ export const SOURCE_PORTAL_STORAGE_KEY = "webbook_source_config";
 export const DEFAULT_SOURCE_CONFIG: SearchSourceConfig = {
   sources: {
     wikipedia: true,
-    duckduckgo: false,
-    google: false,
-    bing: false,
+    duckduckgo: true,
+    google: true,
+    bing: true,
   },
   manualUrls: [],
   executionMode: "sequential",

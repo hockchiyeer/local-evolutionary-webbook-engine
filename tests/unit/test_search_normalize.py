@@ -1,6 +1,6 @@
 import unittest
 
-from engine.search import rank_frontier_results
+from engine.search import enrich_frontier_results, rank_frontier_results, sanitize_search_snippet
 from evolution_engine import dedupe_results, normalize_source_config
 from evolution_engine import expand_query_focus_words, normalize_space, query_words, source_relevance, tokenize
 
@@ -196,6 +196,60 @@ class SearchNormalizeTests(unittest.TestCase):
 
         self.assertEqual("https://energy.edu/reference", ranked[0]["url"])
 
+
+class SearchSnippetEnrichmentTests(unittest.TestCase):
+    def test_sanitize_search_snippet_dedupes_repeated_serp_sentences(self):
+        snippet = (
+            "Grid resilience planning helps utilities prioritize restoration work after severe outages. "
+            "Grid resilience planning helps utilities prioritize restoration work after severe outages. "
+            "Utilities also use resilience planning to align hardening investments with outage risk."
+        )
+
+        cleaned = sanitize_search_snippet(snippet)
+
+        self.assertEqual(1, cleaned.lower().count("prioritize restoration work"))
+        self.assertIn("hardening investments", cleaned.lower())
+
+    def test_enrich_frontier_results_merges_direct_page_excerpt(self):
+        query = "grid resilience planning"
+        results = [
+            {
+                "url": "https://example.com/grid-guide",
+                "title": "Grid resilience planning guide",
+                "content": "Grid resilience planning overview for utilities and infrastructure teams.",
+                "definitions": [],
+                "subTopics": [],
+                "informativeScore": 0.56,
+                "authorityScore": 0.62,
+                "searchProvider": "google",
+                "searchProviders": ["google"],
+            }
+        ]
+
+        enriched = enrich_frontier_results(
+            results,
+            query,
+            headers={"User-Agent": "test-agent"},
+            fetch_page_document_fn=lambda url, headers, max_chars=2200: {
+                "title": "Grid resilience planning guide",
+                "content": (
+                    "Grid resilience planning is a structured approach to reliability, restoration, hardening, mutual aid, "
+                    "and scenario analysis across electric utility systems. Utilities use it to prioritize assets, establish "
+                    "recovery playbooks, and align investment with outage risk."
+                ),
+            },
+            query_words=query_words,
+            expand_query_focus_words=expand_query_focus_words,
+            tokenize=tokenize,
+            normalize_space=normalize_space,
+            source_relevance=source_relevance,
+            debug=lambda message: None,
+            limit=3,
+        )
+
+        self.assertEqual(1, len(enriched))
+        self.assertIn("scenario analysis", enriched[0]["content"].lower())
+        self.assertIn("page-fetch", enriched[0]["searchProviders"])
 
 if __name__ == "__main__":
     unittest.main()

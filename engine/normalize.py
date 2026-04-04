@@ -106,7 +106,7 @@ def normalize_result(
     normalized_result = {
         "url": url,
         "title": title,
-        "content": content[:2200],
+        "content": content[:2600],
         "informativeScore": informative_score,
         "authorityScore": authority_score,
         "definitions": definitions,

@@ -263,6 +263,56 @@ def _cached_normalize_space(text: Any) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _normalize_comparable_text(text: str) -> str:
+    normalized = _cached_normalize_space(html.unescape(str(text or ""))).lower().replace("&", " and ")
+    return re.sub(r"[^a-z0-9\s]", " ", normalized)
+
+
+def _calculate_text_similarity(left: str, right: str) -> float:
+    left_tokens = {token for token in _normalize_comparable_text(left).split() if len(token) >= 3}
+    right_tokens = {token for token in _normalize_comparable_text(right).split() if len(token) >= 3}
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens.intersection(right_tokens)) / max(len(left_tokens.union(right_tokens)), 1)
+
+
+def _split_search_sentences(text: str) -> List[str]:
+    normalized = _cached_normalize_space(text)
+    if not normalized:
+        return []
+    sentences = [segment.strip() for segment in re.split(r"(?<=[.!?])\s+", normalized) if segment.strip()]
+    return sentences or [normalized]
+
+
+def sanitize_search_snippet(text: str) -> str:
+    cleaned = _cached_normalize_space(re.sub(r"\.\.\.\s*(?=[A-Z])", " ", text or ""))
+    unique: List[str] = []
+    for sentence in _split_search_sentences(cleaned):
+        if len(sentence) < 35:
+            continue
+        if any(_calculate_text_similarity(existing, sentence) >= 0.88 for existing in unique):
+            continue
+        unique.append(sentence)
+        if len(unique) >= 4:
+            break
+    return " ".join(unique) if unique else cleaned
+
+
+def _merge_evidence_text(snippet: str, page_content: str, *, max_chars: int = 2200) -> str:
+    merged: List[str] = []
+    for block in (sanitize_search_snippet(snippet), _cached_normalize_space(page_content)):
+        for sentence in _split_search_sentences(block):
+            if not sentence:
+                continue
+            if any(_calculate_text_similarity(existing, sentence) >= 0.9 for existing in merged):
+                continue
+            candidate = " ".join(merged + [sentence])
+            if merged and len(candidate) > max_chars:
+                return " ".join(merged)[:max_chars]
+            merged.append(sentence)
+    return (" ".join(merged) if merged else _cached_normalize_space(page_content or snippet))[:max_chars]
+
+
 @lru_cache(maxsize=96)
 def _cached_wikipedia_lookup(
     query: str,
@@ -452,7 +502,7 @@ def search_duckduckgo(
             continue
 
         seen_urls.add(url)
-        content = normalize_space(f"{title}. {snippet}") if snippet else title
+        content = normalize_space(f"{title}. {sanitize_search_snippet(snippet)}") if snippet else title
         if not content or len(content) < 30:
             continue
 
@@ -510,7 +560,7 @@ def search_bing(
             continue
 
         seen_urls.add(url)
-        content = normalize_space(f"{title}. {snippet}") if snippet else title
+        content = normalize_space(f"{title}. {sanitize_search_snippet(snippet)}") if snippet else title
         if not content or len(content) < 30:
             continue
 
@@ -593,7 +643,7 @@ def search_google(
             continue
 
         seen_urls.add(url)
-        content = normalize_space(f"{title}. {snippet}") if snippet else title
+        content = normalize_space(f"{title}. {sanitize_search_snippet(snippet)}") if snippet else title
         if not content or len(content) < 30:
             continue
 
@@ -936,6 +986,64 @@ def should_supplement_with_fallback(
     }
 
 
+def enrich_frontier_results(
+    results: Sequence[Dict[str, Any]],
+    query: str,
+    *,
+    headers: Dict[str, str],
+    fetch_page_document_fn: Callable[..., Dict[str, Any]],
+    query_words: Callable[[str], set[str]],
+    expand_query_focus_words: Callable[[set[str]], set[str]],
+    tokenize: Callable[[str], Sequence[str]],
+    normalize_space: Callable[[Any], str],
+    source_relevance: Callable[[Dict[str, Any], set[str]], float],
+    debug: Callable[[str], None],
+    limit: int = 6,
+) -> List[Dict[str, Any]]:
+    if not results:
+        return list(results)
+    ranked = rank_frontier_results(results, query, query_words=query_words, expand_query_focus_words=expand_query_focus_words, tokenize=tokenize, normalize_space=normalize_space, source_relevance=source_relevance)
+    updates: Dict[str, Dict[str, Any]] = {}
+    for result in ranked:
+        providers = [normalize_space(provider).lower() for provider in (result.get("searchProviders", []) or []) if normalize_space(provider)]
+        primary = normalize_space(result.get("searchProvider", "")).lower()
+        if primary and primary not in providers:
+            providers.insert(0, primary)
+        url = normalize_http_url(result.get("url", "")) or _cached_normalize_space(result.get("url", "")).lower()
+        content = normalize_space(result.get("content", ""))
+        if not url or url in updates or not can_fetch_page(url) or result.get("_isFallback"):
+            continue
+        if "manual" in providers or "wikipedia" in providers:
+            continue
+        if len(content) >= 820 and len(_split_search_sentences(content)) >= 5:
+            continue
+        if len(updates) >= limit:
+            break
+        try:
+            document = fetch_page_document_fn(url, headers, max_chars=2200)
+        except TypeError:
+            document = fetch_page_document_fn(url, headers)
+        except Exception as error:
+            debug(f"Page enrichment failed for {url}: {error}")
+            continue
+        page_content = normalize_space((document or {}).get("content", ""))
+        if not page_content:
+            continue
+        merged = _merge_evidence_text(content, page_content, max_chars=2200)
+        if len(merged) <= len(content) + 40:
+            continue
+        updated = dict(result)
+        updated["content"] = merged
+        if "page-fetch" not in providers:
+            providers.append("page-fetch")
+        updated["searchProviders"] = providers
+        updates[url] = updated
+    if not updates:
+        return list(results)
+    debug(f"Enriched {len(updates)} frontier results with direct page excerpts")
+    return [dict(updates.get(normalize_http_url(result.get("url", "")) or _cached_normalize_space(result.get("url", "")).lower(), result)) for result in results]
+
+
 def search_web_results(
     query: str,
     source_config: Any = None,
@@ -953,6 +1061,7 @@ def search_web_results(
     results_miss_query_focus: Callable[[str, Sequence[Dict[str, Any]], set], bool],
     build_adaptive_fallback_results: Callable[[str, Sequence[Dict[str, Any]], int], Sequence[Dict[str, Any]]],
     choose_user_agent: Callable[[], str],
+    fetch_page_document: Callable[..., Dict[str, Any]],
     debug: Callable[[str], None],
 ) -> Sequence[Dict[str, Any]]:
     normalized_source_config = normalize_source_config(source_config)
@@ -1006,6 +1115,23 @@ def search_web_results(
                     f"{len(filtered_results)} of {len(normalized_results)} frontier results"
                 )
             normalized_results = filtered_results
+
+    if normalized_results:
+        normalized_results = list(dedupe_results(
+            enrich_frontier_results(
+                normalized_results,
+                query,
+                headers=build_search_headers(choose_user_agent=choose_user_agent),
+                fetch_page_document_fn=fetch_page_document,
+                query_words=query_words,
+                expand_query_focus_words=expand_query_focus_words,
+                tokenize=tokenize,
+                normalize_space=normalize_space,
+                source_relevance=source_relevance,
+                debug=debug,
+            ),
+            query,
+        ))
 
     ranked_results = rank_frontier_results(
         normalized_results,

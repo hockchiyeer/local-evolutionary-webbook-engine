@@ -108,9 +108,9 @@ CHAPTER_TEMPLATES = [
 
 DEFAULT_SOURCE_SELECTION = {
     "wikipedia": True,
-    "duckduckgo": False,
-    "google": False,
-    "bing": False,
+    "duckduckgo": True,
+    "google": True,
+    "bing": True,
 }
 
 USER_AGENTS = [
@@ -902,6 +902,7 @@ def search_web(query, source_config=None):
             build_subtopic_candidates=build_subtopic_candidates,
         ),
         choose_user_agent=lambda: random.choice(USER_AGENTS),
+        fetch_page_document=fetch_page_document,
         debug=lambda message: print(f"DEBUG: {message}", file=sys.stderr),
     )
 
