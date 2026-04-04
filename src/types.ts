@@ -58,7 +58,7 @@ export interface WebBook {
   id: string;
   topic: string;
   chapters: Chapter[];
-  generatedAt: string;
+  timestamp: number;
 }
 
 export type EvolutionStatus = 'idle' | 'searching' | 'evolving' | 'assembling' | 'complete';

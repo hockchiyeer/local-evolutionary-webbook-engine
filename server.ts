@@ -54,7 +54,7 @@ async function startServer() {
       ? MIN_REQUEST_TIMEOUT_MS
       : EXTENDED_REQUEST_TIMEOUT_MS;
 
-    let dataString = "";
+    let dataChunks: Buffer[] = [];
     let errorString = "";
     let responded = false;
     let timedOut = false;
@@ -86,7 +86,7 @@ async function startServer() {
       }
       proc.stdin.end();
 
-      proc.stdout.on("data", (d: any) => dataString += d.toString());
+      proc.stdout.on("data", (d: Buffer | string) => dataChunks.push(Buffer.isBuffer(d) ? d : Buffer.from(d)));
       proc.stderr.on("data", (d: any) => errorString += d.toString());
 
       proc.on("error", (error: any) => {
@@ -108,6 +108,7 @@ async function startServer() {
           });
         }
         
+        const dataString = Buffer.concat(dataChunks).toString('utf8');
         const trimmedOutput = dataString.trim();
         if (!trimmedOutput) {
           console.error(`Python process returned empty output for mode ${mode}`);
@@ -133,7 +134,9 @@ async function startServer() {
 
     const startProcess = (cmd: string) => {
       try {
-        const proc = spawn(cmd, args);
+        const proc = spawn(cmd, args, {
+          env: { ...process.env, PYTHONIOENCODING: "utf-8" }
+        });
         
         proc.on("error", (err: any) => {
           if (responded) return;

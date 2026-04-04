@@ -30,8 +30,28 @@ const SEARCH_PROVIDER_ORDER: SearchSourceKey[] = [
   "bing",
 ];
 
+function deepDecodeUtf8(obj: any): any {
+  if (typeof obj === 'string') {
+    try {
+      return decodeURIComponent(escape(obj));
+    } catch {
+      return obj;
+    }
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(deepDecodeUtf8);
+  }
+  if (obj !== null && typeof obj === 'object') {
+    return Object.fromEntries(
+      Object.entries(obj).map(([key, val]) => [key, deepDecodeUtf8(val)])
+    );
+  }
+  return obj;
+}
+
 async function readResponseBody(response: Response) {
-  const text = await response.text();
+  const buffer = await response.arrayBuffer();
+  const text = new TextDecoder('utf-8').decode(buffer);
   const contentType = response.headers.get("content-type") || "";
 
   if (!text) {
@@ -39,13 +59,14 @@ async function readResponseBody(response: Response) {
   }
 
   if (contentType.includes("application/json")) {
-    return JSON.parse(text);
+    return deepDecodeUtf8(JSON.parse(text));
   }
 
   try {
-    return JSON.parse(text);
+    return deepDecodeUtf8(JSON.parse(text));
   } catch {
-    return text;
+    // If it's a raw string, decode it directly
+    return deepDecodeUtf8(text);
   }
 }
 
