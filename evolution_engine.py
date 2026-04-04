@@ -34,7 +34,6 @@ from engine.normalize import (
 )
 from engine.organize import (
     build_chapter_sentence_pool,
-    build_fallback_paragraph as build_fallback_paragraph_impl,
     build_source_clusters,
     choose_items_for_chapter as choose_items_for_chapter_impl,
     choose_theme_candidates as choose_theme_candidates_impl,
@@ -1132,8 +1131,7 @@ def choose_items_for_chapter(items, keyword_set, used_keys, key_name, text_gette
     )
 
 
-def build_fallback_paragraph(query, title, supporting_sources):
-    return build_fallback_paragraph_impl(query, title, supporting_sources)
+# Deprecated build_fallback_paragraph logic has been eliminated
 
 
 def score_sentence(sentence, q_words, theme_words, source_quality, novelty_penalty, words=None):
@@ -1331,38 +1329,71 @@ def generate_webbook(selected_sources, query):
             reverse=True,
         )
 
-        selected_entries = []
-        supporting_source_indexes = []
-        for _, entry in scored_sentences:
-            sentence_key = (entry["source_index"], entry["sentence_index"])
-            if sentence_key in used_sentence_keys:
-                continue
-            selected_entries.append(entry)
-            supporting_source_indexes.append(entry["source_index"])
-            used_sentence_keys.add(sentence_key)
-            if len(selected_entries) >= 6:
-                break
-
-        if len(selected_entries) < 4:
-            for _, entry in scored_sentences:
+        pool_size_micro = 15
+        generations_micro = 8
+        sentence_gene_pool = [entry for _, entry in scored_sentences[:max(20, len(scored_sentences))]]
+        
+        if len(sentence_gene_pool) < 2:
+            selected_entries = sentence_gene_pool
+            for entry in selected_entries:
                 sentence_key = (entry["source_index"], entry["sentence_index"])
-                if sentence_key in [(item["source_index"], item["sentence_index"]) for item in selected_entries]:
-                    continue
-                selected_entries.append(entry)
-                supporting_source_indexes.append(entry["source_index"])
-                if len(selected_entries) >= 6:
-                    break
+                used_sentence_keys.add(sentence_key)
+        else:
+            target_sentences_count = min(len(sentence_gene_pool), random.randint(4, 6))
+            
+            def calculate_sentence_fitness(chromosome):
+                chrom_sentences = [sentence_gene_pool[idx] for idx in chromosome]
+                text = " ".join(s["sentence"] for s in chrom_sentences)
+                words = set(tokenize(text))
+                overlap_score = len(words.intersection(focus_words)) / max(len(focus_words), 1)
+                density_score = max(0.0, 1.0 - abs(len(words) - 65) / 65.0)
+                quality_score = sum(s["source_quality"] for s in chrom_sentences) / len(chrom_sentences)
+                used_sources = len(set(s["source_index"] for s in chrom_sentences))
+                diversity_score = used_sources / len(chrom_sentences)
+                return (overlap_score * 0.4) + (quality_score * 0.3) + (diversity_score * 0.2) + (density_score * 0.1)
+
+            population_micro = []
+            for _ in range(pool_size_micro):
+                population_micro.append(random.sample(range(len(sentence_gene_pool)), target_sentences_count))
+                
+            for _ in range(generations_micro):
+                scored_pop = [(calculate_sentence_fitness(chrom), chrom) for chrom in population_micro]
+                scored_pop.sort(key=lambda x: x[0], reverse=True)
+                next_pop = [chrom for _, chrom in scored_pop[:2]]
+                while len(next_pop) < pool_size_micro:
+                    parent1 = random.choice(scored_pop[:5])[1]
+                    parent2 = random.choice(scored_pop[:5])[1]
+                    split = random.randint(1, target_sentences_count - 1)
+                    child = parent1[:split] + parent2[split:]
+                    child = list(dict.fromkeys(child))
+                    while len(child) < target_sentences_count:
+                        fallback = random.randint(0, len(sentence_gene_pool) - 1)
+                        if fallback not in child:
+                            child.append(fallback)
+                    if random.random() < 0.2:
+                        mutate_idx = random.randint(0, target_sentences_count - 1)
+                        mutant = random.randint(0, len(sentence_gene_pool) - 1)
+                        if mutant not in child:
+                            child[mutate_idx] = mutant
+                    next_pop.append(child)
+                population_micro = next_pop 
+                
+            scored_pop = [(calculate_sentence_fitness(chrom), chrom) for chrom in population_micro]
+            scored_pop.sort(key=lambda x: x[0], reverse=True)
+            elite_chromosome = scored_pop[0][1]
+            selected_entries = [sentence_gene_pool[idx] for idx in elite_chromosome]
+            for entry in selected_entries:
+                sentence_key = (entry["source_index"], entry["sentence_index"])
+                used_sentence_keys.add(sentence_key)
 
         selected_entries.sort(key=lambda entry: (entry.get("cluster_priority", 0), entry["source_index"], entry["sentence_index"]))
         paragraph = " ".join(entry["sentence"] for entry in selected_entries).strip()
+        supporting_source_indexes = [entry["source_index"] for entry in selected_entries]
         supporting_sources = [
             normalized_sources[index]
             for index in unique_preserve_order(supporting_source_indexes)
             if 0 <= index < len(normalized_sources)
         ]
-
-        if len(tokenize(paragraph)) < 55:
-            paragraph = build_fallback_paragraph(query, chapter_title, supporting_sources)
 
         chapter_definition_pool = dedupe_definitions([
             definition

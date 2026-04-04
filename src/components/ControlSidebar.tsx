@@ -447,14 +447,14 @@ export function ControlSidebar({
       {/* Fitness Function and Sequence */}
       <section className="bg-white border border-[#141414] p-6 shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]">
         <h3 className="text-[10px] uppercase font-bold mb-3 flex items-center justify-between">
-          <span className="flex items-center gap-2"><Dna size={12} /> Fitness Function F(w)</span>
-          <span className="font-mono text-[9px] opacity-40">v2.5_EVO</span>
+          <span className="flex items-center gap-2"><Dna size={12} /> Fitness Function F(S)</span>
+          <span className="font-mono text-[9px] opacity-40" title="Macro-GA [Sources] + Micro-GA [Sentences]">v3.0_DUAL_EVO</span>
         </h3>
         <div className="space-y-3 font-mono text-[10px]">
           <div className="flex justify-between items-end border-b border-[#141414]/20 pb-2">
             <div className="flex flex-col">
-              <span className="text-[8px] opacity-50 uppercase tracking-tighter">Formula</span>
-              <span className="text-[11px] font-bold">F(w) = α·I(w) + β·A(w)</span>
+              <span className="text-[8px] opacity-50 uppercase tracking-tighter">2-Stage Extractor Formula</span>
+              <span className="text-[10px] font-bold tracking-tight">F(S)=Σ[Re,In,Au,Co,Di,St] ➔ μGA(w)</span>
             </div>
             <div className="flex flex-col items-end">
               <span className="text-[8px] opacity-40 uppercase tracking-tighter">Current Best</span>

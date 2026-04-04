@@ -303,58 +303,6 @@ def choose_items_for_chapter(
     return selected
 
 
-def build_fallback_paragraph(query: str, title: str, supporting_sources: Sequence[MutableMapping[str, Any]]) -> str:
-    archetype = infer_query_archetype(
-        query,
-        supporting_sources,
-        tokenize=lambda text: re.findall(r"[A-Za-z0-9']{2,}", str(text or "").lower()),
-        stop_words={
-            "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how", "in",
-            "is", "it", "of", "on", "or", "that", "the", "this", "to", "what", "when",
-            "where", "which", "with",
-        },
-        normalize_space=lambda value: re.sub(r"\s+", " ", str(value or "")).strip(),
-    )
-
-    if archetype == "person":
-        if supporting_sources:
-            source = supporting_sources[0]
-            return (
-                f"{query} has been examined through {title.lower()}, drawing on biographical records, "
-                f"institutional histories, and analytical commentary from multiple perspectives. "
-                f"{source.get('title', query)} provides relevant context about career milestones and public impact, "
-                f"complemented by archival records, speeches, and critical assessments. "
-                f"Scholars distinguish documented career achievements from later interpretations, "
-                f"highlighting both concrete contributions and the enduring debates over {query}'s historical significance."
-            )
-
-        return (
-            f"{query} is a notable figure whose career and legacy are examined through {title.lower()}. "
-            f"Biographical analyses trace the arc of public influence, identifying key institutional roles "
-            f"and decisions that shaped {query}'s historical standing. "
-            f"Competing assessments reflect broader debates about leadership, reform, and legacy "
-            f"that define why {query} remains a subject of sustained scholarly and public interest."
-        )
-
-    if supporting_sources:
-        source = supporting_sources[0]
-        return (
-            f"{title} is a central dimension of {query}, with {source.get('title', query)} "
-            f"providing relevant context for understanding its scope and significance. "
-            f"Evidence drawn from multiple sources highlights the structural patterns, practical applications, "
-            f"and analytical frameworks that characterise {query} across different settings. "
-            f"Comparing how different sources approach {query} clarifies the tradeoffs, constraints, "
-            f"and outcomes that distinguish competing interpretations of the subject."
-        )
-
-    return (
-        f"{title} represents a key aspect of {query} that draws on foundational concepts, "
-        f"applied methods, and comparative evidence from the field. "
-        f"Structural patterns and recurring themes in {query} reflect disciplinary debates "
-        f"about mechanisms, outcomes, measurement, and practical constraints. "
-        f"Integrating multiple analytical perspectives on {title.lower()} illuminates "
-        f"the conditions under which {query} produces different results across contexts."
-    )
 
 
 def score_sentence(

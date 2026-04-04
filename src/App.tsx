@@ -162,9 +162,43 @@ export default function App() {
                   <h2 className="text-2xl md:text-3xl font-serif italic text-[#141414] mb-6 tracking-widest break-words w-full">
                     EVOLVING KNOWLEDGE STRUCTURE
                   </h2>
-                  <p className="text-xs uppercase font-mono tracking-widest leading-loose text-[#141414]/50 mb-20 max-w-lg mx-auto">
-                    The engine is currently mining concepts, evaluating informative value, and pruning redundant data structures...
+                  <p className="text-xs uppercase font-mono tracking-widest leading-loose text-[#141414]/50 mb-12 max-w-lg mx-auto">
+                    The engine is currently mining concepts, calculating Jaccard fitness, running Micro-GA crossovers, and mutating sentence sequences...
                   </p>
+
+                  <div className="flex justify-center gap-16 md:gap-24 w-full max-w-sm mx-auto mb-16">
+                    {/* Generation Ring Tracker */}
+                    <div className="flex flex-col items-center gap-4">
+                      <div className="relative w-20 h-20 flex items-center justify-center">
+                        <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100">
+                          <circle cx="50" cy="50" r="46" stroke="#141414" strokeWidth="1.5" fill="none" opacity="0.1" />
+                          <circle cx="50" cy="50" r="46" stroke="#141414" strokeWidth="2" strokeDasharray="4 6" fill="none" opacity="0.5" className="animate-spin" style={{ animationDuration: '10s' }} />
+                        </svg>
+                        <div className="absolute flex items-center justify-center">
+                          <span className="text-4xl font-light tabular-nums tracking-tighter text-[#141414]">
+                            {engine.state.generation || 0}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-[9px] font-bold tracking-[0.25em] uppercase text-[#141414]/50">Generation</span>
+                    </div>
+
+                    {/* Target Pop Dotted Orbit */}
+                    <div className="flex flex-col items-center gap-4">
+                      <div className="relative w-20 h-20 flex items-center justify-center">
+                        <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100">
+                          <circle cx="50" cy="50" r="46" stroke="#141414" strokeWidth="1.5" fill="none" opacity="0.1" />
+                          <circle cx="50" cy="50" r="46" stroke="#141414" strokeWidth="2" strokeDasharray="4 6" fill="none" opacity="0.5" className="animate-spin" style={{ animationDuration: '10s' }} />
+                        </svg>
+                        <div className="absolute flex items-center justify-center">
+                          <span className="text-4xl font-light tabular-nums tracking-tighter text-[#141414]">
+                            {engine.state.population?.length || 0}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-[9px] font-bold tracking-[0.25em] uppercase text-[#141414]/50">Target Pop.</span>
+                    </div>
+                  </div>
 
                   <div className="w-full max-w-xl mx-auto border-t border-b border-[#141414]/10 py-12 relative overflow-hidden">
                     <div className="absolute top-1/2 left-0 right-0 h-[1px] bg-[#141414]/20 -translate-y-1/2 z-0" />
@@ -185,7 +219,7 @@ export default function App() {
                         <span className={`text-[10px] font-bold tracking-[0.2em] uppercase ${
                           (engine.state.status === 'assembling' || engine.state.status === 'complete') ? 'text-[#141414]' :
                           engine.state.status === 'evolving' ? 'text-purple-600' : 'text-[#141414]/40'
-                        }`}>Evolving</span>
+                        }`}>Source Evolution</span>
                       </div>
                       <div className="flex flex-col items-center gap-5 bg-white px-4">
                         <div className={`w-3.5 h-3.5 rounded-full border-2 ${
@@ -193,7 +227,7 @@ export default function App() {
                         }`} style={{ transition: 'all 0.5s ease' }} />
                         <span className={`text-[10px] font-bold tracking-[0.2em] uppercase ${
                           engine.state.status === 'assembling' ? 'text-green-600' : 'text-[#141414]/40'
-                        }`}>Assembling</span>
+                        }`}>Sentence Micro-GA</span>
                       </div>
                     </div>
                   </div>
