@@ -58,6 +58,7 @@ from engine.search import (
     search_web_results,
 )
 from engine.titles import build_chapter_title
+from engine.reinforcement import normalize_reward_profile
 
 POISON_KEYWORDS = [
     "copyright",
@@ -951,7 +952,7 @@ def get_mock_results(query):
         build_subtopic_candidates=build_subtopic_candidates,
     )
 
-def calculate_fitness(individual, all_results, query):
+def calculate_fitness(individual, all_results, query, reward_profile=None):
     q_words = query_words(query)
     focus_words = expand_query_focus_words(q_words)
     if any("_semantic_coherence" not in result for result in all_results):
@@ -980,11 +981,12 @@ def calculate_fitness(individual, all_results, query):
         content_signature_tokens=content_signature_tokens,
         jaccard_similarity=jaccard_similarity,
         average=average,
+        reward_profile=reward_profile,
     )
     return score
 
 
-def calculate_fitness_breakdown(individual, all_results, query):
+def calculate_fitness_breakdown(individual, all_results, query, reward_profile=None):
     q_words = query_words(query)
     focus_words = expand_query_focus_words(q_words)
     if any("_semantic_coherence" not in result for result in all_results):
@@ -1013,6 +1015,7 @@ def calculate_fitness_breakdown(individual, all_results, query):
         content_signature_tokens=content_signature_tokens,
         jaccard_similarity=jaccard_similarity,
         average=average,
+        reward_profile=reward_profile,
     )
     return breakdown
 
@@ -1041,8 +1044,9 @@ def mutate(individual, ranked_indices, target_size, pool_size, rng):
 def tournament_pick(scored_population, rng, size=4):
     return ga_tournament_pick(scored_population, rng, size=size)
 
-def evolve(all_results, query, generations=10, pop_size=30):
+def evolve(all_results, query, generations=10, pop_size=30, reward_profile=None):
     normalized_results = dedupe_results(all_results, query)
+    normalized_reward_profile = normalize_reward_profile(reward_profile)
     if not normalized_results:
         return []
 
@@ -1060,7 +1064,7 @@ def evolve(all_results, query, generations=10, pop_size=30):
     def get_fitness(individual):
         key = tuple(sorted(individual))
         if key not in fitness_cache:
-            fitness_cache[key] = calculate_fitness(individual, normalized_results, query)
+            fitness_cache[key] = calculate_fitness(individual, normalized_results, query, reward_profile=normalized_reward_profile)
         return fitness_cache[key]
 
     attach_selection_features(
@@ -1172,7 +1176,7 @@ def choose_items_for_chapter(items, keyword_set, used_keys, key_name, text_gette
 # Deprecated build_fallback_paragraph logic has been eliminated
 
 
-def score_sentence(sentence, q_words, theme_words, source_quality, novelty_penalty, words=None):
+def score_sentence(sentence, q_words, theme_words, source_quality, novelty_penalty, words=None, reward_profile=None):
     return score_sentence_impl(
         sentence,
         q_words,
@@ -1180,10 +1184,12 @@ def score_sentence(sentence, q_words, theme_words, source_quality, novelty_penal
         source_quality,
         novelty_penalty,
         words=words,
+        reward_profile=reward_profile,
     )
 
-def generate_webbook(selected_sources, query):
+def generate_webbook(selected_sources, query, reward_profile=None):
     normalized_sources = dedupe_results(selected_sources, query)
+    normalized_reward_profile = normalize_reward_profile(reward_profile)
     empty_archetype = infer_query_archetype(
         query,
         (),
@@ -1330,6 +1336,7 @@ def generate_webbook(selected_sources, query):
             semantic_title_focus=semantic_title_focus,
             chapter_index=chapter_index,
             chapter_count=len(chapter_templates),
+            reward_profile=normalized_reward_profile,
             tokenize=tokenize,
             stop_words=STOP_WORDS,
             normalize_term_key=normalize_term_key,
@@ -1368,7 +1375,8 @@ def generate_webbook(selected_sources, query):
                 keyword_set,
                 entry["source_quality"],
                 novelty_penalty,
-                words=entry.get("words")
+                words=entry.get("words"),
+                reward_profile=normalized_reward_profile,
             )
             score -= entry.get("cluster_priority", 0) * 0.12
             scored_sentences.append((score, entry))
@@ -1403,7 +1411,20 @@ def generate_webbook(selected_sources, query):
                 quality_score = sum(s["source_quality"] for s in chrom_sentences) / len(chrom_sentences)
                 used_sources = len(set(s["source_index"] for s in chrom_sentences))
                 diversity_score = used_sources / len(chrom_sentences)
-                return (overlap_score * 0.4) + (quality_score * 0.3) + (diversity_score * 0.2) + (density_score * 0.1)
+                reward_weights = normalized_reward_profile["weights"]
+                weighted_total = (
+                    (overlap_score * 0.4 * reward_weights["relevance"])
+                    + (quality_score * 0.3 * reward_weights["evidenceDensity"])
+                    + (diversity_score * 0.2 * reward_weights["diversity"])
+                    + (density_score * 0.1 * reward_weights["structure"])
+                )
+                weight_normalizer = (
+                    (0.4 * reward_weights["relevance"])
+                    + (0.3 * reward_weights["evidenceDensity"])
+                    + (0.2 * reward_weights["diversity"])
+                    + (0.1 * reward_weights["structure"])
+                ) or 1.0
+                return weighted_total / weight_normalizer
 
             population_micro = []
             for _ in range(pool_size_micro):
@@ -1478,6 +1499,7 @@ def generate_webbook(selected_sources, query):
             semantic_title_focus=semantic_title_focus,
             chapter_index=chapter_index,
             chapter_count=len(chapter_templates),
+            reward_profile=normalized_reward_profile,
             tokenize=tokenize,
             stop_words=STOP_WORDS,
             normalize_term_key=normalize_term_key,
@@ -1600,9 +1622,16 @@ def main():
                 print_json(strip_internal_keys(all_results))
             elif mode == "evolve":
                 try:
-                    payload = read_payload()
-                    all_results = json.loads(payload)
-                    evolved_sources = evolve(all_results, query)
+                    payload = json.loads(read_payload())
+                    if isinstance(payload, dict):
+                        all_results = payload.get("population", [])
+                        generations = int(payload.get("generations", 10) or 10)
+                        reward_profile = payload.get("rewardProfile")
+                    else:
+                        all_results = payload
+                        generations = 10
+                        reward_profile = None
+                    evolved_sources = evolve(all_results, query, generations=generations, reward_profile=reward_profile)
                     print_json(strip_internal_keys(evolved_sources))
                 except json.JSONDecodeError as e:
                     print_json({"error": f"Invalid JSON payload for evolution: {str(e)}"})
@@ -1610,9 +1639,14 @@ def main():
                     print_json({"error": f"Evolution failed: {str(e)}"})
             elif mode == "assemble":
                 try:
-                    payload = read_payload()
-                    evolved_sources = json.loads(payload)
-                    webbook = generate_webbook(evolved_sources, query)
+                    payload = json.loads(read_payload())
+                    if isinstance(payload, dict):
+                        evolved_sources = payload.get("population", [])
+                        reward_profile = payload.get("rewardProfile")
+                    else:
+                        evolved_sources = payload
+                        reward_profile = None
+                    webbook = generate_webbook(evolved_sources, query, reward_profile=reward_profile)
                     print_json(strip_internal_keys(webbook))
                 except json.JSONDecodeError as e:
                     print_json({"error": f"Invalid JSON payload for assembly: {str(e)}"})

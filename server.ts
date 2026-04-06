@@ -38,15 +38,15 @@ async function startServer() {
   });
 
   app.post("/api/evolve", (req, res) => {
-    const { query, population } = req.body;
+    const { query, population, generations, rewardProfile } = req.body;
     if (!query || !population) return res.status(400).json({ error: "Query and population are required" });
-    runPython("evolve", query, population, res);
+    runPython("evolve", query, { population, generations, rewardProfile }, res);
   });
 
   app.post("/api/assemble", (req, res) => {
-    const { query, population } = req.body;
+    const { query, population, rewardProfile } = req.body;
     if (!query || !population) return res.status(400).json({ error: "Query and population are required" });
-    runPython("assemble", query, population, res);
+    runPython("assemble", query, { population, rewardProfile }, res);
   });
 
   function runPython(mode: string, query: string, data: any, res: any) {

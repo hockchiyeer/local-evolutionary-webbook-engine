@@ -232,7 +232,12 @@ const stageColorMap: Record<string, { active: string; complete: string }> = {
                 exit={{ opacity: 0, scale: 0.95 }}
                 className="w-full flex justify-center"
               >
-                <WebBookViewer webBook={engine.webBook} />
+                <WebBookViewer
+                  webBook={engine.webBook}
+                  rewardProfile={engine.rewardProfile}
+                  onUpdateWebBookFeedback={engine.updateWebBookFeedback}
+                  onUpdateChapterFeedback={engine.updateChapterFeedback}
+                />
               </motion.div>
             ) : engine.state.status === 'idle' ? (
               <motion.div

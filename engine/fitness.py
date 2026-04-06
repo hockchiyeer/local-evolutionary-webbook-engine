@@ -1,8 +1,9 @@
 """Selection fitness helpers extracted from the main engine."""
 
-from typing import Any, Callable, Dict, MutableMapping, Sequence, Set, Tuple
+from typing import Any, Callable, Mapping, MutableMapping, Sequence, Set, Tuple
 
 from .contracts import SelectionFitnessBreakdown
+from .reinforcement import normalize_reward_profile
 
 
 def calculate_selection_fitness(
@@ -20,6 +21,7 @@ def calculate_selection_fitness(
     content_signature_tokens: Callable[[str], Set[str]],
     jaccard_similarity: Callable[[Set[str], Set[str]], float],
     average: Callable[[Sequence[float], float], float],
+    reward_profile: Mapping[str, Any] | None = None,
 ) -> Tuple[float, SelectionFitnessBreakdown]:
     unique_indices = unique_preserve_order(individual)
     if not unique_indices:
@@ -88,17 +90,28 @@ def calculate_selection_fitness(
         1.0,
     )
 
-    # Preserve the current repo's scoring behavior exactly, while exposing a reusable breakdown.
+    normalized_reward_profile = normalize_reward_profile(reward_profile)
+    reward_weights = normalized_reward_profile["weights"]
+    weighted_components = {
+        "relevance": 0.25 * reward_weights["relevance"],
+        "informative": 0.20 * reward_weights["evidenceDensity"],
+        "authority": 0.18 * reward_weights["authority"],
+        "coverage": 0.14 * reward_weights["coverage"],
+        "concept_diversity": 0.13 * reward_weights["diversity"],
+        "structure_score": 0.10 * reward_weights["structure"],
+    }
+    weight_total = sum(weighted_components.values()) or 1.0
+
     score = (
-        (relevance * 0.25)
-        + (informative * 0.20)
-        + (authority * 0.18)
-        + (coverage * 0.14)
-        + (concept_diversity * 0.13)
-        + (structure_score * 0.10)
-    )
-    score *= 0.65 + (0.35 * pairwise_diversity)
-    score += semantic_coherence * 0.035
+        (relevance * weighted_components["relevance"])
+        + (informative * weighted_components["informative"])
+        + (authority * weighted_components["authority"])
+        + (coverage * weighted_components["coverage"])
+        + (concept_diversity * weighted_components["concept_diversity"])
+        + (structure_score * weighted_components["structure_score"])
+    ) / weight_total
+    score *= (0.65 + (0.35 * pairwise_diversity)) * (0.88 + (0.12 * reward_weights["antiRedundancy"]))
+    score += semantic_coherence * 0.035 * reward_weights["coherence"]
     score -= spam_risk * 0.055
     total = round(min(max(score, 0.0), 1.0), 6)
 

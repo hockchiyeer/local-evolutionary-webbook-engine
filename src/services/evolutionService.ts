@@ -1,4 +1,4 @@
-import { SearchSourceConfig, SearchSourceKey, WebPageGenotype } from "../types";
+import { RewardProfile, SearchSourceConfig, SearchSourceKey, WebPageGenotype } from "../types";
 
 export type SearchBatchProvider = SearchSourceKey | "manual" | "local-synthesis";
 
@@ -404,11 +404,16 @@ export async function searchAndExtract(
 export async function evolve(
   population: WebPageGenotype[],
   query: string,
-  generations: number = 3
+  generations: number = 3,
+  rewardProfile?: RewardProfile,
 ): Promise<WebPageGenotype[]> {
-  return await callApi("evolve", { query, population, generations });
+  return await callApi("evolve", { query, population, generations, rewardProfile });
 }
 
-export async function assembleWebBook(optimalPopulation: WebPageGenotype[], topic: string): Promise<any> {
-  return await callApi("assemble", { query: topic, population: optimalPopulation });
+export async function assembleWebBook(
+  optimalPopulation: WebPageGenotype[],
+  topic: string,
+  rewardProfile?: RewardProfile,
+): Promise<any> {
+  return await callApi("assemble", { query: topic, population: optimalPopulation, rewardProfile });
 }
