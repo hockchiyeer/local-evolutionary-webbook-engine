@@ -27,7 +27,7 @@ from engine.ga import (
 from engine.nlp import extract_subtopic_tree, semantic_similarity
 from engine.nlp_graph import concept_crawl_depth, expand_semantic_phrases, expand_semantic_terms
 from engine.query_profiles import build_query_profile, query_profile_alignment_score
-from engine.archetypes import get_chapter_templates
+from engine.archetypes import get_chapter_templates, infer_query_archetype
 from engine.normalize import (
     dedupe_results as dedupe_results_impl,
     normalize_result as normalize_result_impl,
@@ -1114,6 +1114,12 @@ _META_GUIDANCE_RE = re.compile(
     r'|when live retrieval is'
     r'|source coverage is available'
     r'|strongest available source here is'
+    r'|published in'
+    r'|work type'
+    r'|subjects include'
+    r'|publisher:'
+    r'|authors?:'
+    r'|year:'
     r')',
     re.IGNORECASE,
 )
@@ -1178,16 +1184,31 @@ def score_sentence(sentence, q_words, theme_words, source_quality, novelty_penal
 
 def generate_webbook(selected_sources, query):
     normalized_sources = dedupe_results(selected_sources, query)
+    empty_archetype = infer_query_archetype(
+        query,
+        (),
+        tokenize=tokenize,
+        stop_words=STOP_WORDS,
+        normalize_space=normalize_space,
+    )
     if not normalized_sources:
         return {
             "topic": query,
             "chapters": [],
             "id": f"book-{int(time.time())}",
-            "timestamp": int(time.time() * 1000)
+            "timestamp": int(time.time() * 1000),
+            "topicArea": empty_archetype,
         }
 
     q_words = query_words(query)
     focus_words = expand_query_focus_words(q_words)
+    archetype = infer_query_archetype(
+        query,
+        normalized_sources,
+        tokenize=tokenize,
+        stop_words=STOP_WORDS,
+        normalize_space=normalize_space,
+    )
     chapter_templates = get_chapter_templates(
         CHAPTER_TEMPLATES,
         query,
@@ -1510,14 +1531,17 @@ def generate_webbook(selected_sources, query):
             "definitions": chapter_definitions,
             "subTopics": chapter_subtopics,
             "sourceUrls": source_urls,
-            "visualSeed": visual_seed
+            "visualSeed": visual_seed,
+            "facetLabel": base_label,
+            "archetype": archetype,
         })
         
     return {
         "topic": query,
         "chapters": chapters,
         "id": f"book-{int(time.time())}",
-        "timestamp": int(time.time() * 1000)
+        "timestamp": int(time.time() * 1000),
+        "topicArea": archetype,
     }
 
 def strip_internal_keys(data):

@@ -26,6 +26,15 @@ CHAPTER_TITLE_FALLBACKS = {
     "Future Directions": "Scenarios",
 }
 
+ROMAN_NUMERAL_PATTERN = re.compile(r"^[ivxlcdm]+$", re.IGNORECASE)
+LOW_SIGNAL_TITLE_TOKENS = {
+    "article", "articles", "biographical", "biography", "book", "books", "career",
+    "careers", "chapter", "chapters", "context", "critical", "epic", "essay",
+    "essays", "legacy", "paper", "papers", "part", "program", "programs",
+    "report", "reports", "review", "reviews", "study", "studies", "volume",
+    "volumes",
+}
+
 
 def _soft_overlap_ratio(tokens: Set[str], keywords: Set[str]) -> float:
     if not tokens or not keywords:
@@ -159,24 +168,39 @@ def build_chapter_title(
     query_key = normalize_term_key(query)
     base_key = normalize_term_key(base_label)
     topic_label = derive_topic_label(query, tokenize=tokenize, stop_words=stop_words)
-    candidates: List[str] = [focus_phrase]
+    candidates: List[str] = []
+    candidate_bonus_by_key: Dict[str, float] = {}
     target_layer = _chapter_depth_target(chapter_index, chapter_count)
     semantic_focus_key = _semantic_key(semantic_title_focus)
 
-    if semantic_title_focus:
-        candidates.insert(0, semantic_title_focus)
+    def add_candidate(value: str, bonus: float = 0.0) -> None:
+        if not value:
+            return
+        candidates.append(value)
+        candidate_key = _semantic_key(value)
+        if candidate_key:
+            candidate_bonus_by_key[candidate_key] = max(candidate_bonus_by_key.get(candidate_key, 0.0), bonus)
 
-    candidates.extend(definition.get("term", "") for definition in chapter_definitions)
-    candidates.extend(subtopic.get("title", "") for subtopic in chapter_subtopics)
-    candidates.extend(topic.get("label", "") for topic in semantic_subtopic_tree if isinstance(topic, dict))
-    candidates.extend(expand_semantic_phrases(query, max_depth=2, limit=max(6, chapter_count)))
+    add_candidate(focus_phrase, 0.06)
+    if semantic_title_focus:
+        add_candidate(semantic_title_focus, 0.18)
+
+    for definition in chapter_definitions:
+        add_candidate(definition.get("term", ""), 0.24)
+    for subtopic in chapter_subtopics:
+        add_candidate(subtopic.get("title", ""), 0.26)
+    for topic in semantic_subtopic_tree:
+        if isinstance(topic, dict):
+            add_candidate(topic.get("label", ""), 0.08)
+    for phrase in expand_semantic_phrases(query, max_depth=2, limit=max(6, chapter_count)):
+        add_candidate(phrase, 0.04)
 
     for source in supporting_sources[:3]:
-        candidates.append(source.get("title", ""))
+        add_candidate(source.get("title", ""), 0.10)
         for definition in (source.get("definitions", []) or [])[:2]:
-            candidates.append(definition.get("term", ""))
+            add_candidate(definition.get("term", ""), 0.18)
         for subtopic in (source.get("subTopics", []) or [])[:2]:
-            candidates.append(subtopic.get("title", ""))
+            add_candidate(subtopic.get("title", ""), 0.20)
 
     semantic_bonus_by_key: Dict[str, float] = {}
     for offset, topic in enumerate(semantic_subtopic_tree):
@@ -215,7 +239,7 @@ def build_chapter_title(
             for token in filtered_candidate_tokens
             if token.lower() not in focus_words
         ]
-        if query_filtered_tokens and len(query_filtered_tokens) < len(filtered_candidate_tokens):
+        if len(query_filtered_tokens) >= 2 and len(query_filtered_tokens) < len(filtered_candidate_tokens):
             filtered_compact = " ".join(_display_token(token) for token in query_filtered_tokens[:CHAPTER_TITLE_MAX_WORDS]).strip()
             if filtered_compact:
                 compact = filtered_compact
@@ -225,6 +249,21 @@ def build_chapter_title(
         if not token_set:
             continue
 
+        low_signal_tokens = {
+            token
+            for token in token_set
+            if token in LOW_SIGNAL_TITLE_TOKENS or ROMAN_NUMERAL_PATTERN.fullmatch(token)
+        }
+        if len(token_set) == 1:
+            lone_token = next(iter(token_set))
+            if lone_token in LOW_SIGNAL_TITLE_TOKENS or ROMAN_NUMERAL_PATTERN.fullmatch(lone_token) or len(lone_token) <= 2:
+                continue
+        if low_signal_tokens and len(low_signal_tokens) == len(token_set) and len(token_set) <= 2:
+            continue
+        non_signal_tokens = token_set.difference(low_signal_tokens)
+        if len(token_set) <= 2 and low_signal_tokens and non_signal_tokens and non_signal_tokens.issubset(focus_words):
+            continue
+
         overlap_score = (
             _soft_overlap_ratio(token_set, template_keywords) * 1.5
             + (len(token_set.intersection(focus_words)) / max(len(token_set), 1)) * 1.2
@@ -232,7 +271,12 @@ def build_chapter_title(
         )
         query_overlap_ratio = len(token_set.intersection(focus_words)) / max(len(token_set), 1)
         overlap_score += (1.0 - query_overlap_ratio) * 0.16
+        if low_signal_tokens:
+            overlap_score -= min(0.24 * len(low_signal_tokens), 0.58)
+        if len(token_set) == 1:
+            overlap_score -= 0.16
         semantic_candidate_key = _semantic_key(candidate)
+        overlap_score += candidate_bonus_by_key.get(semantic_candidate_key, 0.0)
         depth_info = depth_map.get(semantic_candidate_key)
         if depth_info:
             overlap_score += _semantic_layer_bonus(str(depth_info.get("layer", "")), target_layer)

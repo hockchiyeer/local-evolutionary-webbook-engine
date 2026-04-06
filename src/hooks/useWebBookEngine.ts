@@ -56,12 +56,12 @@ export const EXECUTION_MODE_CARDS: Array<{
 }> = [
   {
     key: "sequential",
-    label: "Sequential",
+    label: "SEQUENTIAL",
     description: "Recommended for reliability. Runs one provider at a time with clearer progress and lower system pressure.",
   },
   {
     key: "parallel",
-    label: "Parallel",
+    label: "PARALLEL",
     description: "Runs providers together for faster intake on stronger hardware and more stable network conditions.",
   },
 ];

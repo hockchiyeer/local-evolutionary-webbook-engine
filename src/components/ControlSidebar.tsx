@@ -232,20 +232,20 @@ export function ControlSidebar({
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-[minmax(0,0.85fr)_minmax(8.75rem,1.15fr)_minmax(0,0.95fr)]">
             <div className="min-w-0 rounded-[18px] border border-[#d8cbb7] bg-[#fffdf7] p-4">
               <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Sources</div>
               <div className="mt-2 text-2xl font-semibold text-[#1d1710]">{totalEnabledSourceCount}</div>
             </div>
             <div className="min-w-0 rounded-[18px] border border-[#d8cbb7] bg-[#fffdf7] p-4">
               <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Mode</div>
-              <div className="mt-2 min-w-0 break-words text-base font-semibold leading-tight text-[#1d1710] sm:text-lg">
-                {sourceConfig.executionMode === 'parallel' ? 'Parallel' : 'Sequential'}
+              <div className="mt-2 min-w-0 whitespace-nowrap text-[15px] font-semibold leading-tight text-[#1d1710] sm:text-base">
+                {sourceConfig.executionMode.toUpperCase()}
               </div>
             </div>
             <div className="col-span-2 min-w-0 rounded-[18px] border border-[#d8cbb7] bg-[#fffdf7] p-4 sm:col-span-1">
               <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Elapsed</div>
-              <div className="mt-2 min-w-0 break-words text-base font-semibold leading-tight text-[#1d1710] sm:text-lg">{runtimeMs ? formatDuration(runtimeMs) : 'Not started'}</div>
+              <div className="mt-2 min-w-0 text-base font-semibold leading-tight text-[#1d1710] sm:text-lg">{runtimeMs ? formatDuration(runtimeMs) : 'Not started'}</div>
             </div>
           </div>
         </form>

@@ -18,7 +18,7 @@
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
-  
+
   body {
     background-color: white !important;
   }
@@ -27,12 +27,10 @@
     margin: 1cm;
   }
 
-  /* Hide elements with print:hidden class */
   .print\:hidden {
     display: none !important;
   }
 
-  /* Ensure the book container is visible and styled correctly for print */
   .web-book-container {
     width: 100% !important;
     max-width: none !important;
@@ -44,7 +42,6 @@
     display: block !important;
   }
 
-  /* Ensure chapters start on new pages */
   section[id^="chapter-"] {
     break-before: page !important;
     page-break-before: always !important;
@@ -55,13 +52,11 @@
     padding: 2cm !important;
   }
 
-  /* First chapter doesn't need a break before it */
   section#chapter-0 {
     break-before: auto !important;
     page-break-before: auto !important;
   }
 
-  /* Hide scrollbars and other UI elements */
   body {
     overflow: visible !important;
   }
@@ -69,4 +64,5 @@
   #root {
     overflow: visible !important;
   }
+
 }

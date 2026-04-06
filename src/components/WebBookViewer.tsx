@@ -1,17 +1,49 @@
 import React from 'react';
 import { ArrowUpRight, BookOpen, CheckCircle2, Image as ImageIcon, Layers } from 'lucide-react';
-import type { WebBook } from '../types';
+import type { Chapter, WebBook } from '../types';
 import { buildChapterRenderPlan, getChapterSourceLinks, normalizeSourceLink } from '../utils/webBookRender';
 
 interface WebBookViewerProps {
   webBook: WebBook;
 }
 
+const TOPIC_AREA_LABELS: Record<string, string> = {
+  generic: 'Adaptive sequence',
+  impact: 'Conflict sequence',
+  market: 'Market sequence',
+  organization: 'Organization sequence',
+  person: 'Biographical sequence',
+  place: 'Place study sequence',
+  technology: 'Technology sequence',
+};
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const stripChapterPrefix = (value: string) => value.replace(/^Chapter\s+\d+:\s*/i, '').trim();
+
+const buildChapterHeading = (chapter: Chapter, index: number) => {
+  const raw = stripChapterPrefix(chapter.title || '');
+  const fallbackFacet = raw.includes(':') ? raw.split(':')[0].trim() : `Sequence ${index + 1}`;
+  const facetLabel = (chapter.facetLabel || fallbackFacet || `Sequence ${index + 1}`).trim();
+  const withoutFacet = raw.replace(new RegExp(`^${escapeRegExp(facetLabel)}\\s*:\\s*`, 'i'), '').trim();
+  const displayTitle = withoutFacet && withoutFacet.toLowerCase() !== facetLabel.toLowerCase()
+    ? withoutFacet
+    : (raw || chapter.title || facetLabel);
+
+  return {
+    sequence: String(index + 1).padStart(2, '0'),
+    facetLabel,
+    displayTitle,
+  };
+};
+
 export function WebBookViewer({ webBook }: WebBookViewerProps) {
   const chapterRenderPlan = buildChapterRenderPlan(webBook.chapters);
   const finalDocumentPageNumber = chapterRenderPlan.length > 0
     ? (chapterRenderPlan[chapterRenderPlan.length - 1].analysisPageNumber ?? chapterRenderPlan[chapterRenderPlan.length - 1].titlePageNumber) + 1
     : 3;
+  const topicAreaKey = webBook.topicArea || chapterRenderPlan[0]?.chapter.archetype || 'generic';
+  const topicAreaLabel = TOPIC_AREA_LABELS[topicAreaKey] || TOPIC_AREA_LABELS.generic;
 
   return (
     <div className="web-book-container w-full max-w-[900px] space-y-8 overflow-x-hidden print:max-w-none print:space-y-0 print:block print:overflow-visible" id="top">
@@ -22,6 +54,7 @@ export function WebBookViewer({ webBook }: WebBookViewerProps) {
               <Layers size={24} className="-rotate-45" />
             </div>
             <span className="text-[10px] uppercase tracking-[0.5em] opacity-60">Evolutionary Web-Book Engine</span>
+            <span className="rounded-full border border-white/20 px-4 py-1 text-[10px] uppercase tracking-[0.24em] opacity-80">{topicAreaLabel}</span>
           </div>
           <h2 className="text-5xl md:text-7xl font-serif italic font-bold tracking-tighter leading-tight mb-8 break-words">{webBook.topic}</h2>
           <div className="w-24 h-1 bg-[#E4E3E0] mx-auto mb-12 opacity-30" />
@@ -48,17 +81,54 @@ export function WebBookViewer({ webBook }: WebBookViewerProps) {
       </section>
 
       <section id="page-2" data-pdf-page-number="2" data-pdf-page-kind="toc" className="web-book-page p-12 md:p-20 bg-[#FAFAFA] min-h-[1000px] md:min-h-[1123px] flex flex-col relative border border-[#141414] shadow-[12px_12px_0px_0px_rgba(20,20,20,0.12)] print:shadow-none print:border-none print:block print:min-h-0 print:h-auto print:page-break-after-always">
-        <h3 className="text-[14px] uppercase font-bold mb-16 tracking-[0.3em] border-b-2 border-[#141414] pb-6 inline-block self-start">Table of Contents</h3>
-        <div className="space-y-8 flex-1">
-          {chapterRenderPlan.map(({ chapter, titlePageNumber }, index) => (
-            <a key={chapter.title + index} href={`#chapter-${index}`} data-pdf-target-page={titlePageNumber} title={`Navigate to Chapter ${index + 1}`} className="flex items-end gap-4 md:gap-6 group">
-              <span className="font-mono text-base opacity-40">0{index + 1}</span>
-              <span className="text-lg md:text-xl font-medium group-hover:underline underline-offset-8 decoration-1 break-words">{chapter.title}</span>
-              <div className="flex-1 border-b border-dotted border-[#141414] opacity-20 mb-2" />
-              <span className="font-mono text-base opacity-40">P.{titlePageNumber}</span>
-            </a>
-          ))}
+        <div className="flex flex-col gap-4 border-b border-[#141414]/12 pb-8 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h3 className="text-[14px] uppercase font-bold tracking-[0.3em] inline-block self-start">Table of Contents</h3>
+            <p className="mt-4 max-w-2xl text-sm leading-7 text-[#5c5041]">
+              The current run has been organized as a {topicAreaLabel.toLowerCase()} so the book can move from the strongest structural anchors into deeper analysis.
+            </p>
+          </div>
+          <div className="inline-flex items-center rounded-full border border-[#d7cab8] bg-[#fffdf8] px-4 py-2 text-[10px] uppercase tracking-[0.24em] text-[#6f6252]">
+            {chapterRenderPlan.length} sections
+          </div>
         </div>
+
+        <div className="relative mt-10 flex-1">
+          <div className="absolute bottom-8 left-7 top-4 w-px bg-[linear-gradient(180deg,rgba(29,23,16,0.05)_0%,rgba(29,23,16,0.35)_50%,rgba(29,23,16,0.05)_100%)]" />
+          <div className="space-y-4">
+            {chapterRenderPlan.map(({ chapter, titlePageNumber }, index) => {
+              const heading = buildChapterHeading(chapter, index);
+
+              return (
+                <a
+                  key={chapter.title + index}
+                  href={`#chapter-${index}`}
+                  data-pdf-target-page={titlePageNumber}
+                  title={`Navigate to Chapter ${index + 1}`}
+                  className="group relative grid grid-cols-[auto,minmax(0,1fr),auto] gap-4 rounded-[30px] border border-[#e1d6c8] bg-[#fffdf8]/90 p-5 shadow-[0_18px_34px_-30px_rgba(34,24,12,0.38)] transition hover:border-[#1d1710] hover:translate-x-[2px]"
+                >
+                  <span className="relative z-10 flex h-14 w-14 items-center justify-center">
+                    <span className="absolute inset-0 rounded-full border border-[#1d1710]/12" />
+                    <span className="absolute inset-0 rounded-full border border-dashed border-[#1d1710]/38 webbook-orbit" style={{ animationDuration: '12s' }} />
+                    <span className="absolute inset-[7px] rounded-full border border-[#1d1710]/16 webbook-orbit-reverse" style={{ animationDuration: '18s' }} />
+                    <span className="relative text-sm font-semibold tracking-[0.18em] text-[#1d1710]">{heading.sequence}</span>
+                  </span>
+
+                  <span className="min-w-0">
+                    <span className="text-[10px] uppercase tracking-[0.28em] text-[#8a7b67]">{heading.facetLabel}</span>
+                    <span className="mt-2 block text-lg md:text-[1.45rem] font-medium leading-tight text-[#1d1710] break-words">{heading.displayTitle}</span>
+                  </span>
+
+                  <span className="self-center text-right">
+                    <span className="block text-[10px] uppercase tracking-[0.22em] text-[#8a7b67]">Page</span>
+                    <span className="mt-2 inline-flex rounded-full border border-[#d8ccbd] bg-white px-3 py-1 font-mono text-sm text-[#1d1710]">P.{titlePageNumber}</span>
+                  </span>
+                </a>
+              );
+            })}
+          </div>
+        </div>
+
         <div className="mt-auto pt-12 flex justify-center text-[10px] font-mono opacity-40 print:hidden">PAGE 2</div>
       </section>
 
@@ -67,14 +137,23 @@ export function WebBookViewer({ webBook }: WebBookViewerProps) {
           const sourceLinks = getChapterSourceLinks(chapter, { maxItems: 5 });
           const externalSourceLinks = getChapterSourceLinks(chapter, { includeSearchResults: false, maxItems: 4 });
           const verificationSource = externalSourceLinks[0] || sourceLinks[0] || null;
+          const heading = buildChapterHeading(chapter, index);
 
           return (
             <React.Fragment key={chapter.title + titlePageNumber}>
               <section id={`page-${titlePageNumber}`} data-pdf-page-number={String(titlePageNumber)} data-pdf-page-kind="chapter" className="web-book-page p-10 md:p-16 bg-white border border-[#141414] shadow-[12px_12px_0px_0px_rgba(20,20,20,0.12)] min-h-[1000px] md:min-h-[1123px] flex flex-col relative print:shadow-none print:border-none print:block print:min-h-0 print:h-auto print:page-break-after-always">
                 <div id={`chapter-${index}`} className="flex items-center justify-between gap-4 mb-12 border-b border-[#141414]/10 pb-6">
                   <div className="flex items-center gap-4 min-w-0">
-                    <span className="w-10 h-10 bg-[#141414] text-white flex items-center justify-center font-mono text-sm">0{index + 1}</span>
-                    <h3 className="text-3xl md:text-4xl font-serif italic font-bold tracking-tight break-words">{chapter.title}</h3>
+                    <span className="relative flex h-14 w-14 items-center justify-center shrink-0">
+                      <span className="absolute inset-0 rounded-full border border-[#141414]/12" />
+                      <span className="absolute inset-0 rounded-full border border-dashed border-[#141414]/38 webbook-orbit" style={{ animationDuration: '12s' }} />
+                      <span className="absolute inset-[8px] rounded-full border border-[#141414]/16 webbook-orbit-reverse" style={{ animationDuration: '18s' }} />
+                      <span className="relative text-sm font-semibold tracking-[0.18em] text-[#141414]">{heading.sequence}</span>
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-[10px] uppercase font-bold tracking-[0.26em] text-[#8a7b67]">{heading.facetLabel}</div>
+                      <h3 className="mt-3 text-3xl md:text-4xl font-serif italic font-bold tracking-tight break-words">{heading.displayTitle}</h3>
+                    </div>
                   </div>
                   <div className="text-[10px] uppercase font-bold opacity-30 tracking-widest">Chapter {index + 1} / {chapterRenderPlan.length}</div>
                 </div>
