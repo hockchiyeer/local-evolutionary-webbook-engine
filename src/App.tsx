@@ -11,7 +11,10 @@ import { HistoryDrawer } from './components/HistoryDrawer';
 import { WebBookViewer } from './components/WebBookViewer';
 import { exportWebBookToPdf, printWebBook, exportWebBookToWord, exportWebBookToHtml, exportWebBookToTxt } from './services/exportService';
 import { motion, AnimatePresence } from 'motion/react';
-import { Cpu, Dna, Search } from 'lucide-react';
+import { Infinity as InfinityIcon } from 'lucide-react';
+
+const formatElapsed = (runtimeMs: number | null) => (runtimeMs ? `${Math.max(1, Math.round(runtimeMs / 1000))}s` : '0s');
+type LoadingStageState = 'idle' | 'queued' | 'active' | 'complete' | 'error';
 
 export default function App() {
   const [showHistory, setShowHistory] = useState(false);
@@ -23,22 +26,88 @@ export default function App() {
   const completedProviders = engine.artifacts.providerStatuses.filter((status) => status.status === 'complete' || status.status === 'error').length;
   const totalProviders = engine.artifacts.providerStatuses.length;
   const frontierCount = engine.artifacts.searchResults.length;
-  const evolvedCount = engine.artifacts.evolvedPopulation.length;
-  const showRightPaneIntro = !engine.webBook && engine.state.status === 'idle';
-  const activeStage = engine.state.status === 'searching'
-    ? {
-        eyebrow: 'Source Discovery',
-        detail: 'The engine is gathering public-web, book, and scholarly evidence before it ranks the frontier.',
-      }
+  const evolvedCount = engine.artifacts.evolvedPopulation.length || engine.state.population.length;
+  const elapsed = formatElapsed(runtimeMs);
+  const searchStage: LoadingStageState = engine.artifacts.status === 'error' && frontierCount === 0
+    ? 'error'
+    : engine.state.status === 'searching'
+      ? 'active'
+      : (frontierCount > 0 || engine.state.status === 'evolving' || engine.state.status === 'assembling' || engine.state.status === 'complete')
+        ? 'complete'
+        : 'idle';
+  const evolutionStage: LoadingStageState = engine.artifacts.status === 'error' && frontierCount > 0 && evolvedCount === 0
+    ? 'error'
     : engine.state.status === 'evolving'
-      ? {
-          eyebrow: 'Evolutionary Selection',
-          detail: 'The local GA is scoring candidate sources, penalizing redundancy, and selecting the strongest evidence mix.',
-        }
-      : {
-          eyebrow: 'NLP Book Assembly',
-          detail: 'The engine is clustering themes, shaping chapter arcs, and running sentence-level selection for the book draft.',
-        };
+      ? 'active'
+      : (evolvedCount > 0 || engine.state.status === 'assembling' || engine.state.status === 'complete')
+        ? 'complete'
+        : engine.state.status === 'searching'
+          ? 'queued'
+          : 'idle';
+  const assemblyStage: LoadingStageState = engine.artifacts.status === 'error' && evolvedCount > 0 && !engine.webBook
+    ? 'error'
+    : engine.state.status === 'assembling'
+      ? 'active'
+      : (engine.webBook || engine.state.status === 'complete')
+        ? 'complete'
+        : (engine.state.status === 'searching' || engine.state.status === 'evolving')
+          ? 'queued'
+          : 'idle';
+  const summaryMetrics = [
+    {
+      label: 'Sources Resolved',
+      value: totalProviders ? `${completedProviders}/${totalProviders}` : '0',
+      tone: 'text-blue-600',
+      orbitColor: '#4f86f7',
+      orbitDuration: '4s',
+    },
+    {
+      label: 'Frontier',
+      value: frontierCount,
+      tone: 'text-[#141414]',
+      orbitColor: '#141414',
+      orbitDuration: '4s',
+    },
+    {
+      label: 'Evolved',
+      value: evolvedCount,
+      tone: 'text-purple-600',
+      orbitColor: '#8b5cf6',
+      orbitDuration: '4s',
+    },
+    {
+      label: 'Elapsed',
+      value: elapsed,
+      tone: 'text-green-600',
+      orbitColor: '#22c55e',
+      orbitDuration: '4s',
+    },
+  ];
+  const activeStageDetail = engine.state.status === 'searching'
+    ? 'The engine is gathering public-web, book, and scholarly evidence before it ranks the frontier.'
+    : engine.state.status === 'evolving'
+      ? 'The local GA is scoring candidate sources, penalizing redundancy, and selecting the strongest evidence mix.'
+      : 'The engine is clustering themes, shaping chapter arcs, and running sentence-level selection for the book draft.';
+  const stageMetrics = [
+    {
+      label: 'Source Discovery',
+      state: searchStage,
+      activeText: 'text-[#141414]',
+      activeDot: 'border-[#141414] bg-[#141414]',
+    },
+    {
+      label: 'Evolutionary Selection',
+      state: evolutionStage,
+      activeText: 'text-purple-600',
+      activeDot: 'border-purple-500 bg-purple-100',
+    },
+    {
+      label: 'NLP Book Assembly',
+      state: assemblyStage,
+      activeText: 'text-green-600',
+      activeDot: 'border-green-500 bg-green-100',
+    },
+  ];
 
   const handleExportPdf = async () => {
     if (!engine.webBook) return;
@@ -90,6 +159,21 @@ export default function App() {
     }
   };
 
+const stageColorMap: Record<string, { active: string; complete: string }> = {
+  'Source Discovery': {
+    active: '#141414',
+    complete: '#141414',
+  },
+  'Evolutionary Selection': {
+    active: '#8b5cf6',
+    complete: '#8b5cf6',
+  },
+  'NLP Book Assembly': {
+    active: '#22c55e',
+    complete: '#22c55e',
+  },
+};
+
   return (
     <div className="min-h-screen bg-[#E4E3E0] text-[#141414] font-sans selection:bg-[#141414] selection:text-[#E4E3E0]">
       <AppHeader
@@ -139,41 +223,6 @@ export default function App() {
         />
 
         <div className="lg:col-span-8 space-y-8 flex flex-col min-h-[60vh] relative w-full overflow-hidden print:overflow-visible">
-          {showRightPaneIntro && (
-            <motion.section
-              key="right-pane-intro"
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="print:hidden rounded-[30px] border border-[#1d1710] bg-[linear-gradient(180deg,#fffef8_0%,#f2e6d5_100%)] p-6 shadow-[0_24px_60px_-36px_rgba(34,24,12,0.45)] md:p-8"
-            >
-              <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-[#7b6e5d]">WebBook Studio</p>
-              <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                <div className="min-w-0">
-                  <h2 className="font-serif text-[2.2rem] leading-none text-[#1d1710] md:text-[3rem]">
-                    Tune the next reading run
-                  </h2>
-                  <p className="mt-4 max-w-2xl text-sm leading-7 text-[#5d5245] md:text-base">
-                    Blend public sources, domain-specific metadata, and local evolutionary synthesis into a stronger reading report.
-                  </p>
-                </div>
-                <div className="grid grid-cols-2 gap-3 text-left sm:grid-cols-3">
-                  <div className="rounded-[18px] border border-[#d8ccbd] bg-[#fffdf8] px-4 py-3">
-                    <div className="text-[10px] uppercase tracking-[0.22em] text-[#8a7b67]">Sources</div>
-                    <div className="mt-2 text-lg font-semibold text-[#1d1710]">{Object.values(engine.sourceConfig.sources).filter(Boolean).length + engine.sourceConfig.manualUrls.length}</div>
-                  </div>
-                  <div className="rounded-[18px] border border-[#d8ccbd] bg-[#fffdf8] px-4 py-3">
-                    <div className="text-[10px] uppercase tracking-[0.22em] text-[#8a7b67]">Mode</div>
-                    <div className="mt-2 text-lg font-semibold leading-tight text-[#1d1710]">{engine.sourceConfig.executionMode === 'parallel' ? 'Parallel' : 'Sequential'}</div>
-                  </div>
-                  <div className="col-span-2 rounded-[18px] border border-[#d8ccbd] bg-[#fffdf8] px-4 py-3 sm:col-span-1">
-                    <div className="text-[10px] uppercase tracking-[0.22em] text-[#8a7b67]">Pipeline</div>
-                    <div className="mt-2 text-lg font-semibold leading-tight text-[#1d1710]">Ready to launch</div>
-                  </div>
-                </div>
-              </div>
-            </motion.section>
-          )}
-
           <AnimatePresence mode="popLayout">
             {engine.webBook ? (
               <motion.div
@@ -204,78 +253,142 @@ export default function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                className="print:hidden flex flex-col justify-center flex-1 w-full rounded-[34px] border border-[#1d1710] bg-[linear-gradient(180deg,#fffef8_0%,#efe4d2_100%)] p-8 md:p-12 min-h-[620px] mb-8 shadow-[0_28px_80px_-44px_rgba(34,24,12,0.5)]"
+                className="print:hidden flex flex-col items-center justify-center flex-1 w-full bg-white border border-[#141414] shadow-[12px_12px_0px_0px_rgba(20,20,20,0.12)] p-12 min-h-[600px] mb-8"
               >
-                <div className="mx-auto flex w-full max-w-3xl flex-col justify-center text-center">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.34em] text-[#7b6e5d]">
-                    {activeStage.eyebrow}
+                <div className="flex flex-col items-center justify-center max-w-2xl mx-auto w-full text-center">
+                  <div className="relative w-24 h-24 mb-10 mx-auto">
+                    <div className="absolute inset-0 border-2 border-[#141414] rounded-full border-t-transparent animate-spin opacity-60" style={{ animationDuration: '2s' }} />
+                    <div className="absolute inset-2 border-2 border-[#141414] rounded-full border-b-transparent animate-spin" style={{ animationDirection: 'reverse', animationDuration: '3s', opacity: 0.8 }} />
+                    <div className="absolute inset-0 flex items-center justify-center text-[#141414]">
+                      <InfinityIcon size={28} strokeWidth={1.5} className="opacity-40 animate-pulse" />
+                    </div>
                   </div>
-                  <h2 className="mt-4 font-serif text-[2.6rem] leading-none text-[#1d1710]">
-                    Building the next WebBook
+
+                  <h2 className="text-2xl md:text-3xl font-serif italic text-[#141414] mb-6 tracking-widest break-words w-full">
+                    EVOLVING KNOWLEDGE STRUCTURE
                   </h2>
-                  <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-[#5d5245]">
-                    {activeStage.detail}
+                  <p className="text-xs uppercase font-mono tracking-widest leading-loose text-[#141414]/50 mb-12 max-w-lg mx-auto">
+                    {activeStageDetail}
                   </p>
 
-                  <div className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-4">
-                    <div className="rounded-[22px] border border-[#d8ccbd] bg-[#fffdf8] p-4 text-left">
-                      <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Sources Resolved</div>
-                      <div className="mt-2 text-2xl font-semibold text-[#1d1710]">{totalProviders ? `${completedProviders}/${totalProviders}` : '0'}</div>
-                    </div>
-                    <div className="rounded-[22px] border border-[#d8ccbd] bg-[#fffdf8] p-4 text-left">
-                      <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Frontier</div>
-                      <div className="mt-2 text-2xl font-semibold text-[#1d1710]">{frontierCount}</div>
-                    </div>
-                    <div className="rounded-[22px] border border-[#d8ccbd] bg-[#fffdf8] p-4 text-left">
-                      <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Evolved</div>
-                      <div className="mt-2 text-2xl font-semibold text-[#1d1710]">{evolvedCount || engine.state.population.length}</div>
-                    </div>
-                    <div className="rounded-[22px] border border-[#d8ccbd] bg-[#fffdf8] p-4 text-left">
-                      <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Elapsed</div>
-                      <div className="mt-2 text-2xl font-semibold text-[#1d1710]">{runtimeMs ? `${Math.max(1, Math.round(runtimeMs / 1000))}s` : '0s'}</div>
+                  <div className="w-full max-w-xl mx-auto border-t border-b border-[#141414]/10 py-12 relative overflow-hidden">
+                    {/* Stage progression visualization */}
+                    <div className="relative flex flex-col items-center justify-center px-2 md:px-8">
+                      <div className="grid w-full grid-cols-3">
+                        {stageMetrics.map((stage) => {
+                          const stageColor = stageColorMap[stage.label];
+
+                          return (
+                            <div key={`${stage.label}-label`} className="mb-4 text-center">
+                              <span
+                                className="text-[9px] font-bold uppercase tracking-widest transition-colors duration-500"
+                                style={{ color: stageColor.complete }}
+                              >
+                                {stage.label}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="relative grid w-full grid-cols-3 items-center">
+                        {stageMetrics.map((stage, index) => {
+                          const stageColor = stageColorMap[stage.label];
+                          const dotColor = stageColor.complete;
+                          const isActive = stage.state === 'active';
+                          const isComplete = stage.state === 'complete';
+                          const isQueued = stage.state === 'queued';
+                          const isIdle = stage.state === 'idle';
+                          const showsOpaqueShell = isComplete;
+                          const showConnector = index < stageMetrics.length - 1;
+                          const isConnectorVisible = isActive || isComplete;
+
+                          return (
+                            <div key={stage.label} className="relative flex h-8 items-center justify-center">
+                              {showConnector && (
+                                <div className="pointer-events-none absolute left-1/2 top-1/2 z-0 h-[3px] w-full -translate-y-1/2">
+                                  <div
+                                    className="h-full rounded-full transition-all duration-500"
+                                    style={{
+                                      backgroundColor: isConnectorVisible ? dotColor : '#d8dce2',
+                                      opacity: isConnectorVisible ? 0.95 : 0.45,
+                                      transitionDelay: isConnectorVisible ? `${index * 140}ms` : '0ms',
+                                    }}
+                                  />
+                                </div>
+                              )}
+
+                              <div className="relative z-10 flex h-8 w-8 flex-shrink-0 items-center justify-center">
+                                <div
+                                  className="absolute inset-0 rounded-full border transition-all duration-500"
+                                  style={{
+                                    backgroundColor: showsOpaqueShell ? dotColor : '#ffffff',
+                                    borderColor: showsOpaqueShell
+                                      ? dotColor
+                                      : isActive
+                                        ? `${dotColor}33`
+                                        : '#d1d5db',
+                                    opacity: showsOpaqueShell ? 1 : isIdle ? 0.72 : 0.92,
+                                  }}
+                                />
+
+                                {isActive && (
+                                  <div
+                                    className="absolute inset-0 rounded-full border-[2.5px]"
+                                    style={{
+                                      borderColor: dotColor,
+                                      borderTopColor: 'transparent',
+                                      animation: 'spin 0.6s linear infinite',
+                                    }}
+                                  />
+                                )}
+
+                                <div
+                                  className={`relative z-10 rounded-full transition-all duration-500 ${
+                                    showsOpaqueShell
+                                      ? 'h-6 w-6 shadow-md'
+                                      : isActive
+                                        ? 'h-4 w-4 shadow-lg animate-pulse'
+                                        : 'h-4 w-4 shadow-sm'
+                                  }`}
+                                  style={{
+                                    backgroundColor: dotColor,
+                                    opacity: isIdle ? 0.35 : isQueued ? 0.6 : 1,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
 
-                  <div className="mt-8 grid gap-3 md:grid-cols-3">
-                    {[
-                      {
-                        label: 'Source Discovery',
-                        active: engine.state.status === 'searching',
-                        complete: engine.state.status !== 'idle' && engine.state.status !== 'searching',
-                        icon: Search,
-                      },
-                      {
-                        label: 'Evolutionary Selection',
-                        active: engine.state.status === 'evolving',
-                        complete: engine.state.status === 'assembling' || engine.state.status === 'complete',
-                        icon: Dna,
-                      },
-                      {
-                        label: 'NLP Book Assembly',
-                        active: engine.state.status === 'assembling',
-                        complete: engine.state.status === 'complete',
-                        icon: Cpu,
-                      },
-                    ].map((stage) => {
-                      const Icon = stage.icon;
-                      return (
-                        <div
-                          key={stage.label}
-                          className={`rounded-[22px] border p-4 text-left ${
-                            stage.active
-                              ? 'border-[#1d1710] bg-[#1d1710] text-[#fffaf2]'
-                              : stage.complete
-                                ? 'border-[#245c39] bg-[#eef8f0] text-[#1f4f31]'
-                                : 'border-[#d8ccbd] bg-[#fffdf8] text-[#6b5b4a]'
-                          }`}
-                        >
-                          <div className="inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.22em]">
-                            <Icon size={12} />
-                            {stage.label}
-                          </div>
+                  <div className="mt-16 pt-8 w-full border-t border-[#141414]/5 grid grid-cols-2 md:grid-cols-4 gap-4 justify-items-center opacity-80 bg-[#FAFAFA] p-6 rounded shadow-inner">
+                    {summaryMetrics.map((metric) => (
+                      <div key={metric.label} className="flex flex-col items-center overflow-hidden w-full">
+                        <span className={`text-[9px] font-bold uppercase tracking-widest mb-2 truncate ${metric.tone}`}>{metric.label}</span>
+                        <div className="relative h-16 w-16 flex items-center justify-center">
+                          <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" aria-hidden="true">
+                            <circle cx="50" cy="50" r="46" stroke="#141414" strokeWidth="1.5" fill="none" opacity="0.08" />
+                            <circle
+                              cx="50"
+                              cy="50"
+                              r="46"
+                              stroke={metric.orbitColor}
+                              strokeWidth="2"
+                              strokeDasharray="4 6"
+                              fill="none"
+                              opacity="1.5"
+                              style={{
+                                animation: `spin ${metric.orbitDuration} linear infinite`
+                              }}
+                            />
+                          </svg>
+                          <span className="relative text-2xl font-mono text-[#141414]">{metric.value}</span>
                         </div>
-                      );
-                    })}
+                      </div>
+                    ))}
                   </div>
                 </div>
               </motion.div>

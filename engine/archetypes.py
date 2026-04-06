@@ -21,6 +21,47 @@ PERSON_SUPPORT_TERMS = {
     "administration", "office", "cabinet", "reform",
 }
 
+ORGANIZATION_QUERY_TERMS = {
+    "business", "company", "corporate", "earnings", "equity", "guidance",
+    "management", "margin", "margins", "platform", "product", "products",
+    "revenue", "revenues", "shareholder", "stock", "stocks", "valuation",
+}
+
+ORGANIZATION_SUPPORT_TERMS = {
+    "board", "business model", "customer", "customers", "ecosystem", "executive",
+    "gross margin", "management", "market share", "platform", "portfolio",
+    "product", "products", "profit", "revenue", "revenues", "supplier",
+}
+
+MARKET_QUERY_TERMS = {
+    "capital", "capacity", "commodity", "commodities", "demand", "equities",
+    "equity", "exchange", "exports", "industry", "industries", "investment",
+    "investments", "liquidity", "logistics", "manufacturing", "market", "markets",
+    "pricing", "production", "sector", "sectors", "shipping", "supply", "trade",
+    "valuation", "yields",
+}
+
+MARKET_SUPPORT_TERMS = {
+    "capital flow", "capital flows", "commodity", "commodities", "currency stability",
+    "demand", "disclosure", "earnings", "exchange", "foreign inflow", "foreign investment",
+    "inventory", "liquidity", "market", "pricing", "production", "regulation",
+    "sector rotation", "supply chain", "trade", "valuation",
+}
+
+TECHNOLOGY_QUERY_TERMS = {
+    "ai", "algorithm", "algorithms", "api", "apis", "automation", "chip", "chips",
+    "cloud", "compute", "cybersecurity", "data", "digital", "model", "models",
+    "platform", "platforms", "robotics", "semiconductor", "semiconductors",
+    "software", "technology", "technologies",
+}
+
+TECHNOLOGY_SUPPORT_TERMS = {
+    "adoption", "benchmark", "capability", "capabilities", "chip", "chips",
+    "cloud", "compute", "data center", "deployment", "ecosystem", "evaluation",
+    "frontier model", "frontier models", "governance", "inference", "model",
+    "models", "platform", "platforms", "safety", "software", "workflows",
+}
+
 ORGANIZATION_TERMS = {
     "inc", "corp", "corporation", "company", "co", "group", "bank", "university",
     "committee", "association", "ministry", "agency", "foundation", "institute",
@@ -30,6 +71,12 @@ ORGANIZATION_TERMS = {
 PLACE_TERMS = {
     "country", "state", "city", "province", "region", "district", "island", "nation",
     "kingdom", "republic", "federation", "territory",
+}
+
+PLACE_SUPPORT_TERMS = {
+    "capital city", "city-state", "demographic", "governance", "housing policy",
+    "infrastructure planning", "institutional structure", "population", "regional role",
+    "urban system",
 }
 
 PERSON_CHAPTER_TEMPLATES: Sequence[Tuple[str, Set[str]]] = (
@@ -69,6 +116,110 @@ IMPACT_CHAPTER_TEMPLATES: Sequence[Tuple[str, Set[str]]] = (
     ("Economic Spillovers", {"economy", "spillover", "inflation", "markets", "investment"}),
     ("Scenario Paths", {"scenario", "path", "trajectory", "branch", "future"}),
     ("Long-Horizon Outlook", {"outlook", "legacy", "decade", "systemic", "consequence"}),
+)
+
+ORGANIZATION_CHAPTER_TEMPLATES: Sequence[Tuple[str, Set[str]]] = (
+    ("Identity and Positioning", {"identity", "position", "mandate", "brand", "overview"}),
+    ("Operating Model", {"business", "model", "operation", "revenue", "workflow"}),
+    ("Products and Capabilities", {"product", "portfolio", "capability", "platform", "technology"}),
+    ("Market Position", {"market", "competition", "customer", "segment", "share"}),
+    ("Leadership and Governance", {"leadership", "governance", "management", "board", "allocation"}),
+    ("Economics and Performance", {"revenue", "margin", "growth", "profit", "performance"}),
+    ("Partnerships and Ecosystem", {"partner", "ecosystem", "supplier", "channel", "alliance"}),
+    ("Risks and Constraints", {"risk", "regulation", "constraint", "exposure", "supply"}),
+    ("Strategy and Execution", {"strategy", "execution", "investment", "roadmap", "prioritization"}),
+    ("Outlook and Scenarios", {"outlook", "scenario", "guidance", "future", "trajectory"}),
+)
+
+ORGANIZATION_FALLBACK_FACETS: Sequence[Tuple[str, str]] = (
+    ("Identity and Positioning", "the organization's mandate, brand, market identity, and the role it plays in the wider landscape"),
+    ("Operating Model", "how the organization creates value through its business model, operations, and structural revenue logic"),
+    ("Products and Capabilities", "the main products, technical capabilities, service layers, or strategic assets that define the offering"),
+    ("Market Position", "how the organization competes, where it is differentiated, and which customer segments matter most"),
+    ("Leadership and Governance", "how leadership, management discipline, governance structures, and capital allocation shape outcomes"),
+    ("Economics and Performance", "how revenue quality, margins, growth, and operating leverage influence performance"),
+    ("Partnerships and Ecosystem", "how suppliers, partners, channels, developers, and alliances expand or constrain the organization"),
+    ("Risks and Constraints", "which regulatory, supply, competitive, execution, or concentration risks most affect the organization"),
+    ("Strategy and Execution", "how the organization prioritizes investments, sequences execution, and translates strategy into operating results"),
+    ("Outlook and Scenarios", "which forward scenarios, guidance ranges, and structural shifts most affect the organization's outlook"),
+)
+
+PLACE_CHAPTER_TEMPLATES: Sequence[Tuple[str, Set[str]]] = (
+    ("Geographic Context", {"geography", "location", "territory", "land", "context"}),
+    ("Historical Formation", {"history", "formation", "timeline", "colonial", "development"}),
+    ("Institutions and Governance", {"institution", "governance", "policy", "state", "administration"}),
+    ("Economic Base", {"economy", "trade", "industry", "finance", "growth"}),
+    ("Society and Demographics", {"society", "demography", "population", "labor", "community"}),
+    ("Infrastructure and Urban Systems", {"infrastructure", "transport", "housing", "urban", "planning"}),
+    ("Culture and Identity", {"culture", "identity", "language", "heritage", "civic"}),
+    ("Regional and Global Role", {"regional", "global", "trade", "diplomacy", "positioning"}),
+    ("Development Challenges", {"challenge", "constraint", "inequality", "resource", "pressure"}),
+    ("Long-Term Outlook", {"outlook", "future", "development", "trajectory", "resilience"}),
+)
+
+PLACE_FALLBACK_FACETS: Sequence[Tuple[str, str]] = (
+    ("Geographic Context", "the physical setting, territorial context, and spatial conditions that frame the place"),
+    ("Historical Formation", "the historical path that shaped institutions, settlement patterns, and the present-day development model"),
+    ("Institutions and Governance", "how state institutions, governance arrangements, and policy choices organize the place"),
+    ("Economic Base", "the industries, trade linkages, labor patterns, and revenue engines that sustain the local economy"),
+    ("Society and Demographics", "population structure, social composition, migration patterns, and demographic pressures"),
+    ("Infrastructure and Urban Systems", "how transport, housing, utilities, and planning systems support daily function and long-run growth"),
+    ("Culture and Identity", "the cultural narratives, civic identity, and social norms that shape how the place is interpreted"),
+    ("Regional and Global Role", "how the place relates to neighboring regions, global networks, trade routes, or diplomacy"),
+    ("Development Challenges", "which structural bottlenecks, policy tensions, or resource constraints complicate future development"),
+    ("Long-Term Outlook", "the major trajectories, risks, and resilience factors that shape the place over the next decade"),
+)
+
+MARKET_CHAPTER_TEMPLATES: Sequence[Tuple[str, Set[str]]] = (
+    ("Market Foundations", {"market", "scope", "structure", "baseline", "overview"}),
+    ("Demand Drivers", {"demand", "consumption", "customer", "earnings", "spending"}),
+    ("Supply and Capacity", {"supply", "capacity", "production", "inventory", "throughput"}),
+    ("Capital Flows and Liquidity", {"capital", "flow", "liquidity", "funding", "valuation"}),
+    ("Competition and Positioning", {"competition", "position", "sector", "rotation", "share"}),
+    ("Policy and Regulation", {"policy", "regulation", "governance", "disclosure", "standards"}),
+    ("Economics and Pricing", {"pricing", "cost", "margin", "commodity", "economics"}),
+    ("Risks and Constraints", {"risk", "constraint", "volatility", "bottleneck", "exposure"}),
+    ("Strategic Scenarios", {"scenario", "strategy", "allocation", "decision", "rotation"}),
+    ("Forward Outlook", {"outlook", "future", "trajectory", "signals", "forecast"}),
+)
+
+MARKET_FALLBACK_FACETS: Sequence[Tuple[str, str]] = (
+    ("Market Foundations", "the baseline market structure, scope, participants, and how value moves through the system"),
+    ("Demand Drivers", "which customer needs, earnings trends, spending patterns, or end-use conditions most shape demand"),
+    ("Supply and Capacity", "how production, inventory, logistics, throughput, and capacity constraints shape supply"),
+    ("Capital Flows and Liquidity", "how investment, cross-border flows, liquidity conditions, and valuation discipline affect the market"),
+    ("Competition and Positioning", "how sectors, firms, substitutes, or strategic positions shift advantage across the market"),
+    ("Policy and Regulation", "how regulation, disclosure standards, industrial policy, or market rules shape participant behavior"),
+    ("Economics and Pricing", "how pricing power, cost structures, commodity linkages, and unit economics affect performance"),
+    ("Risks and Constraints", "which bottlenecks, volatility sources, policy shocks, or operational risks most threaten the market"),
+    ("Strategic Scenarios", "the main branching scenarios, allocation choices, and decision frameworks that matter for market participants"),
+    ("Forward Outlook", "the next-stage trajectory, leading indicators, and structural questions that define the market outlook"),
+)
+
+TECHNOLOGY_CHAPTER_TEMPLATES: Sequence[Tuple[str, Set[str]]] = (
+    ("Capital and Compute", {"capital", "compute", "investment", "infrastructure", "scaling"}),
+    ("Capability Frontier", {"capability", "frontier", "performance", "benchmark", "model"}),
+    ("Infrastructure Stack", {"infrastructure", "stack", "data", "chip", "cloud"}),
+    ("Product and Workflow Adoption", {"product", "workflow", "adoption", "deployment", "use"}),
+    ("Ecosystem and Competition", {"ecosystem", "competition", "platform", "vendor", "open"}),
+    ("Economics and Commercialization", {"economics", "revenue", "cost", "commercialization", "incentive"}),
+    ("Governance and Risk", {"governance", "risk", "safety", "policy", "security"}),
+    ("Measurement and Evidence", {"measurement", "evaluation", "evidence", "metric", "benchmark"}),
+    ("Strategy and Execution", {"strategy", "execution", "integration", "capability", "procurement"}),
+    ("Future Trajectories", {"future", "trend", "scenario", "roadmap", "trajectory"}),
+)
+
+TECHNOLOGY_FALLBACK_FACETS: Sequence[Tuple[str, str]] = (
+    ("Capital and Compute", "how investment, compute access, and infrastructure scale shape the pace and direction of the technology"),
+    ("Capability Frontier", "what the leading performance frontier looks like and which technical capabilities define progress"),
+    ("Infrastructure Stack", "which chips, data systems, cloud layers, and enabling infrastructure support deployment"),
+    ("Product and Workflow Adoption", "how the technology moves from prototype to real workflow adoption and user value"),
+    ("Ecosystem and Competition", "how vendors, open ecosystems, platform control, and substitutes shape competition"),
+    ("Economics and Commercialization", "how costs, pricing, monetization, and incentives determine commercial viability"),
+    ("Governance and Risk", "which safety, policy, legal, and operational risks most shape adoption"),
+    ("Measurement and Evidence", "which benchmarks, evaluation methods, and evidence streams best indicate progress or limits"),
+    ("Strategy and Execution", "how organizations prioritize bets, build capabilities, and sequence implementation"),
+    ("Future Trajectories", "the most plausible future paths, scenario splits, and structural uncertainties ahead"),
 )
 
 IMPACT_FALLBACK_FACETS: Sequence[Tuple[str, str]] = (
@@ -113,6 +264,31 @@ def _supports_person_archetype(
     return score >= 2
 
 
+def _query_term_score(tokens: Sequence[str], terms: Set[str]) -> int:
+    return sum(1 for token in tokens if token in terms)
+
+
+def _support_term_score(
+    supporting_results: Sequence[Dict[str, Any]],
+    terms: Set[str],
+    *,
+    normalize_space: Callable[[Any], str],
+) -> int:
+    score = 0
+    for result in supporting_results[:6]:
+        text = normalize_space(
+            f"{result.get('title', '')} {result.get('content', '')[:420]}"
+        ).lower()
+        matches = sum(1 for term in terms if term in text)
+        if matches >= 4:
+            score += 3
+        elif matches >= 2:
+            score += 2
+        elif matches == 1:
+            score += 1
+    return score
+
+
 def infer_query_archetype(
     query: str,
     supporting_results: Sequence[Dict[str, Any]] = (),
@@ -134,6 +310,30 @@ def infer_query_archetype(
     if _supports_person_archetype(supporting_results, normalize_space=normalize_space):
         return "person"
 
+    organization_query_score = _query_term_score(filtered_tokens, ORGANIZATION_QUERY_TERMS)
+    organization_support_score = _support_term_score(
+        supporting_results,
+        ORGANIZATION_SUPPORT_TERMS,
+        normalize_space=normalize_space,
+    )
+    market_query_score = _query_term_score(filtered_tokens, MARKET_QUERY_TERMS)
+    market_support_score = _support_term_score(
+        supporting_results,
+        MARKET_SUPPORT_TERMS,
+        normalize_space=normalize_space,
+    )
+    technology_query_score = _query_term_score(filtered_tokens, TECHNOLOGY_QUERY_TERMS)
+    technology_support_score = _support_term_score(
+        supporting_results,
+        TECHNOLOGY_SUPPORT_TERMS,
+        normalize_space=normalize_space,
+    )
+    place_support_score = _support_term_score(
+        supporting_results,
+        PLACE_SUPPORT_TERMS,
+        normalize_space=normalize_space,
+    )
+
     if 2 <= len(raw_tokens) <= 4:
         title_case_ratio = sum(1 for token in raw_tokens if _looks_like_titled_name(token)) / max(len(raw_tokens), 1)
         if (
@@ -146,7 +346,21 @@ def infer_query_archetype(
 
     if any(token in ORGANIZATION_TERMS for token in filtered_tokens):
         return "organization"
+    if organization_query_score >= 2:
+        return "organization"
+    if organization_query_score >= 1 and any(_looks_like_titled_name(token) for token in raw_tokens):
+        return "organization"
+    if organization_support_score >= 3:
+        return "organization"
+
+    if market_query_score >= 2 or market_support_score >= 3:
+        return "market"
+    if technology_query_score >= 2 or technology_support_score >= 3:
+        return "technology"
+
     if any(token in PLACE_TERMS for token in filtered_tokens):
+        return "place"
+    if place_support_score >= 2:
         return "place"
     return "generic"
 
@@ -202,6 +416,14 @@ def get_chapter_templates(
         return PERSON_CHAPTER_TEMPLATES
     if archetype == "impact":
         return IMPACT_CHAPTER_TEMPLATES
+    if archetype == "organization":
+        return ORGANIZATION_CHAPTER_TEMPLATES
+    if archetype == "place":
+        return PLACE_CHAPTER_TEMPLATES
+    if archetype == "market":
+        return MARKET_CHAPTER_TEMPLATES
+    if archetype == "technology":
+        return TECHNOLOGY_CHAPTER_TEMPLATES
     return default_templates
 
 
@@ -225,4 +447,12 @@ def get_fallback_facets(
         return PERSON_FALLBACK_FACETS
     if archetype == "impact":
         return IMPACT_FALLBACK_FACETS
+    if archetype == "organization":
+        return ORGANIZATION_FALLBACK_FACETS
+    if archetype == "place":
+        return PLACE_FALLBACK_FACETS
+    if archetype == "market":
+        return MARKET_FALLBACK_FACETS
+    if archetype == "technology":
+        return TECHNOLOGY_FALLBACK_FACETS
     return generic_facets

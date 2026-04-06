@@ -75,6 +75,15 @@ class AdaptiveFallbackTests(unittest.TestCase):
         self.assertNotIn("applications: mahathir", combined_titles)
         self.assertNotIn("constraints: mahathir", combined_titles)
 
+    def test_company_query_fallback_uses_organization_style_facets(self):
+        results = get_mock_results("NVIDIA business outlook 2026")
+        combined_titles = " ".join(result["title"] for result in results[:6]).lower()
+
+        self.assertTrue(
+            any(term in combined_titles for term in ("operating model", "market position", "economics and performance", "outlook and scenarios"))
+        )
+        self.assertNotIn("historical development", combined_titles)
+
     def test_strong_real_frontier_does_not_trigger_fallback(self):
         query = "grid resilience planning"
         decision = should_supplement_with_fallback(

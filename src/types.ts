@@ -52,6 +52,8 @@ export interface Chapter {
   visualSeed?: string;
   definitions: Definition[];
   subTopics: SubTopic[];
+  facetLabel?: string;
+  archetype?: string;
 }
 
 export interface WebBook {
@@ -59,6 +61,7 @@ export interface WebBook {
   topic: string;
   chapters: Chapter[];
   timestamp: number;
+  topicArea?: string;
 }
 
 export type EvolutionStatus = 'idle' | 'searching' | 'evolving' | 'assembling' | 'complete';

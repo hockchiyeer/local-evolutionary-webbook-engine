@@ -10,6 +10,7 @@ LONG_QUERY = (
     "prioritize strategic bets, capability building, and risk mitigation in response?"
 )
 MALAYSIA_QUERY = "outlook for the malaysian stock market over the next one year"
+COMPANY_QUERY = "NVIDIA business outlook 2026"
 
 
 def build_population():
@@ -190,6 +191,59 @@ def build_market_population():
     ]
 
 
+def build_company_population():
+    return [
+        {
+            "title": "NVIDIA data center revenue and AI infrastructure strategy",
+            "url": "https://example.com/nvda-strategy",
+            "content": (
+                "NVIDIA builds its growth around GPU platforms, AI infrastructure, software ecosystems, and data-center "
+                "partnerships. Revenue concentration, product cadence, and hyperscaler demand shape the company outlook."
+            ),
+            "definitions": [
+                {
+                    "term": "GPU Platform",
+                    "description": "Integrated hardware and software stack for accelerated computing.",
+                    "sourceUrl": "https://example.com/nvda-strategy",
+                }
+            ],
+            "subTopics": [
+                {
+                    "title": "Hyperscaler Demand",
+                    "summary": "Cloud-provider demand is a major driver of product mix and revenue growth.",
+                    "sourceUrl": "https://example.com/nvda-strategy",
+                }
+            ],
+            "informativeScore": 0.9,
+            "authorityScore": 0.82,
+        },
+        {
+            "title": "NVIDIA competitive position in AI chips",
+            "url": "https://example.com/nvda-competition",
+            "content": (
+                "Competitive pressure from AMD, custom silicon, and cloud vendors affects NVIDIA margins, supply-chain "
+                "planning, and product differentiation."
+            ),
+            "definitions": [
+                {
+                    "term": "Competitive Position",
+                    "description": "Relative strength versus rivals in price, performance, and ecosystem control.",
+                    "sourceUrl": "https://example.com/nvda-competition",
+                }
+            ],
+            "subTopics": [
+                {
+                    "title": "Custom Silicon",
+                    "summary": "Hyperscalers are developing in-house accelerators that may alter purchasing patterns.",
+                    "sourceUrl": "https://example.com/nvda-competition",
+                }
+            ],
+            "informativeScore": 0.87,
+            "authorityScore": 0.79,
+        },
+    ]
+
+
 class WebBookTitleTests(unittest.TestCase):
     def test_long_query_is_not_repeated_verbatim_in_each_chapter_title(self):
         book = generate_webbook(build_population(), LONG_QUERY)
@@ -212,6 +266,7 @@ class WebBookTitleTests(unittest.TestCase):
         book = generate_webbook(build_population(), LONG_QUERY)
         combined_titles = " ".join(chapter["title"] for chapter in book["chapters"]).lower()
 
+        self.assertEqual("technology", book.get("topicArea"))
         self.assertIn("ai", combined_titles)
         self.assertTrue(
             any(keyword in combined_titles for keyword in ("investment", "applications", "risk", "strategy", "governance"))
@@ -223,10 +278,24 @@ class WebBookTitleTests(unittest.TestCase):
         repeated_phrase_count = sum("stock market" in title for title in titles)
         combined_titles = " ".join(titles)
 
+        self.assertEqual("market", book.get("topicArea"))
         self.assertLessEqual(repeated_phrase_count, 4)
         self.assertTrue(
             any(term in combined_titles for term in ("bursa", "foreign", "commodity", "regulation", "capital"))
         )
+        self.assertTrue(
+            any(term in combined_titles for term in ("market foundations", "capital flows and liquidity", "policy and regulation", "forward outlook"))
+        )
+
+    def test_company_queries_use_organization_chapter_path(self):
+        book = generate_webbook(build_company_population(), COMPANY_QUERY)
+        combined_titles = " ".join(chapter["title"] for chapter in book["chapters"][:6]).lower()
+
+        self.assertEqual("organization", book.get("topicArea"))
+        self.assertTrue(
+            any(term in combined_titles for term in ("operating model", "market position", "economics and performance", "strategy and execution"))
+        )
+        self.assertNotIn("historical development", combined_titles)
 
 
 if __name__ == "__main__":
