@@ -1114,6 +1114,12 @@ _META_GUIDANCE_RE = re.compile(
     r'|when live retrieval is'
     r'|source coverage is available'
     r'|strongest available source here is'
+    r'|published in'
+    r'|work type'
+    r'|subjects include'
+    r'|publisher:'
+    r'|authors?:'
+    r'|year:'
     r')',
     re.IGNORECASE,
 )

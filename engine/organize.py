@@ -7,6 +7,16 @@ from .archetypes import infer_query_archetype
 from .nlp import semantic_similarity
 
 
+_METADATA_PREFIX_PATTERN = re.compile(
+    r"^(?:authors?|by|editor|publisher|published in|first published|work type|subjects include|year|journal|volume|issue|pages?|doi|isbn|issn)\b",
+    re.IGNORECASE,
+)
+_BIBLIOGRAPHIC_SIGNAL_PATTERN = re.compile(
+    r"\b(?:doi|isbn|issn|edition|publisher|journal|volume|issue|work type|subjects include)\b",
+    re.IGNORECASE,
+)
+
+
 def _collect_source_terms(
     source: MutableMapping[str, Any],
     *,
@@ -42,6 +52,27 @@ def _score_cluster_label(
     overlap = len(phrase_words.intersection(query_focus_words)) / max(len(phrase_words), 1)
     specificity = min(len(phrase_words) / 6, 1.0)
     return (overlap * 1.2) + (specificity * 0.35) + (source_relevance_value * 0.55)
+
+
+def _sentence_signal_penalty(sentence: str, token_set: Set[str]) -> float:
+    normalized = sentence.strip().lower()
+    if not normalized:
+        return 1.0
+
+    penalty = 0.0
+    if _METADATA_PREFIX_PATTERN.search(normalized):
+        penalty += 0.72
+    if ":" in normalized[:22]:
+        lead = normalized.split(":", 1)[0]
+        if _METADATA_PREFIX_PATTERN.search(lead):
+            penalty += 0.45
+    if _BIBLIOGRAPHIC_SIGNAL_PATTERN.search(normalized):
+        penalty += 0.18
+    if len(token_set) <= 4:
+        penalty += 0.22
+    if normalized.count(",") >= 5:
+        penalty += 0.12
+    return penalty
 
 
 def build_source_clusters(
@@ -318,6 +349,7 @@ def score_sentence(
     q_overlap = len(token_set.intersection(q_words)) / max(len(q_words), 1)
     theme_overlap = len(token_set.intersection(theme_words)) / max(len(theme_words), 1)
     detail_bonus = min(len(token_set) / 20, 1.0)
+    signal_penalty = _sentence_signal_penalty(sentence, token_set)
 
     return (
         (q_overlap * 1.7)
@@ -325,4 +357,5 @@ def score_sentence(
         + (detail_bonus * 0.4)
         + source_quality
         - novelty_penalty
+        - signal_penalty
     )

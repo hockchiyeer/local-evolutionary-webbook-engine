@@ -14,6 +14,8 @@ QUESTION_WORDS = {
     "can", "could", "should", "would", "will", "may", "might",
 }
 
+COMPARISON_TOKENS = {"vs", "versus", "against"}
+
 PERSON_SUPPORT_TERMS = {
     "biography", "biographical", "born", "career", "legacy", "leader", "leadership",
     "politician", "statesman", "prime", "minister", "president", "founder", "author",
@@ -23,14 +25,18 @@ PERSON_SUPPORT_TERMS = {
 
 ORGANIZATION_QUERY_TERMS = {
     "business", "company", "corporate", "earnings", "equity", "guidance",
-    "management", "margin", "margins", "platform", "product", "products",
-    "revenue", "revenues", "shareholder", "stock", "stocks", "valuation",
+    "editorial", "journalism", "magazine", "media", "newspaper", "newsroom",
+    "management", "margin", "margins", "outlet", "platform", "press",
+    "product", "products", "publication", "publisher", "revenue", "revenues",
+    "shareholder", "stock", "stocks", "valuation",
 }
 
 ORGANIZATION_SUPPORT_TERMS = {
-    "board", "business model", "customer", "customers", "ecosystem", "executive",
-    "gross margin", "management", "market share", "platform", "portfolio",
-    "product", "products", "profit", "revenue", "revenues", "supplier",
+    "board", "business model", "customer", "customers", "ecosystem", "editorial",
+    "executive", "gross margin", "journalism", "management", "market share",
+    "media outlet", "newsroom", "platform", "portfolio", "press freedom",
+    "product", "products", "profit", "publication", "publisher", "reporting",
+    "revenue", "revenues", "supplier",
 }
 
 MARKET_QUERY_TERMS = {
@@ -49,17 +55,22 @@ MARKET_SUPPORT_TERMS = {
 }
 
 TECHNOLOGY_QUERY_TERMS = {
-    "ai", "algorithm", "algorithms", "api", "apis", "automation", "chip", "chips",
-    "cloud", "compute", "cybersecurity", "data", "digital", "model", "models",
-    "platform", "platforms", "robotics", "semiconductor", "semiconductors",
-    "software", "technology", "technologies",
+    "ai", "aerospace", "algorithm", "algorithms", "api", "apis", "astronaut",
+    "automation", "chip", "chips", "cloud", "compute", "cybersecurity", "data",
+    "digital", "launch", "lunar", "mission", "missions", "model", "models",
+    "moon", "nasa", "orbit", "orbital", "orion", "platform", "platforms",
+    "robotics", "rocket", "rockets", "semiconductor", "semiconductors", "software",
+    "space", "spacecraft", "technology", "technologies",
 }
 
 TECHNOLOGY_SUPPORT_TERMS = {
-    "adoption", "benchmark", "capability", "capabilities", "chip", "chips",
-    "cloud", "compute", "data center", "deployment", "ecosystem", "evaluation",
-    "frontier model", "frontier models", "governance", "inference", "model",
-    "models", "platform", "platforms", "safety", "software", "workflows",
+    "adoption", "astronaut", "benchmark", "capability", "capabilities", "chip",
+    "chips", "cloud", "compute", "crew", "data center", "deployment",
+    "ecosystem", "evaluation", "frontier model", "frontier models", "governance",
+    "inference", "launch", "lunar", "mission", "mission architecture", "model",
+    "models", "moon", "nasa", "orbit", "orbital", "orion", "payload",
+    "platform", "platforms", "rocket", "safety", "software", "spacecraft",
+    "workflows",
 }
 
 ORGANIZATION_TERMS = {
@@ -73,11 +84,19 @@ PLACE_TERMS = {
     "kingdom", "republic", "federation", "territory",
 }
 
-PLACE_SUPPORT_TERMS = {
-    "capital city", "city-state", "demographic", "governance", "housing policy",
-    "infrastructure planning", "institutional structure", "population", "regional role",
-    "urban system",
+PLACE_QUERY_TERMS = {
+    "border", "elevation", "glacier", "himalaya", "himalayas", "mount", "mountain",
+    "peak", "plateau", "route", "summit", "terrain", "valley", "volcano",
 }
+
+PLACE_SUPPORT_TERMS = {
+    "border", "capital city", "city-state", "demographic", "elevation", "glacier",
+    "governance", "housing policy", "infrastructure planning", "institutional structure",
+    "mountain", "peak", "population", "regional role", "summit", "urban system",
+    "valley",
+}
+
+PLACE_NAME_PREFIXES = {"mount", "mt"}
 
 PERSON_CHAPTER_TEMPLATES: Sequence[Tuple[str, Set[str]]] = (
     ("Background and Identity", {"background", "identity", "biography", "origin", "early"}),
@@ -302,13 +321,14 @@ def infer_query_archetype(
     raw_tokens = _raw_word_tokens(normalized_query)
     lowered_tokens = [token.lower() for token in raw_tokens]
     filtered_tokens = [token for token in lowered_tokens if token not in stop_words]
+    title_case_ratio = sum(1 for token in raw_tokens if _looks_like_titled_name(token)) / max(len(raw_tokens), 1)
+    comparison_query = any(token in COMPARISON_TOKENS for token in lowered_tokens)
+    has_mount_prefix = bool(lowered_tokens) and lowered_tokens[0] in PLACE_NAME_PREFIXES
 
     if "impact_forecast" in query_profile.get("intent_tags", set()):
         return "impact"
     if "sports_event" in query_profile.get("intent_tags", set()):
         return "generic"
-    if _supports_person_archetype(supporting_results, normalize_space=normalize_space):
-        return "person"
 
     organization_query_score = _query_term_score(filtered_tokens, ORGANIZATION_QUERY_TERMS)
     organization_support_score = _support_term_score(
@@ -328,21 +348,16 @@ def infer_query_archetype(
         TECHNOLOGY_SUPPORT_TERMS,
         normalize_space=normalize_space,
     )
+    place_query_score = _query_term_score(filtered_tokens, PLACE_QUERY_TERMS)
     place_support_score = _support_term_score(
         supporting_results,
         PLACE_SUPPORT_TERMS,
         normalize_space=normalize_space,
     )
+    person_support = _supports_person_archetype(supporting_results, normalize_space=normalize_space)
 
-    if 2 <= len(raw_tokens) <= 4:
-        title_case_ratio = sum(1 for token in raw_tokens if _looks_like_titled_name(token)) / max(len(raw_tokens), 1)
-        if (
-            title_case_ratio >= 0.66
-            and not any(token in QUESTION_WORDS for token in lowered_tokens)
-            and not any(token in ORGANIZATION_TERMS for token in lowered_tokens)
-            and not any(token in PLACE_TERMS for token in lowered_tokens)
-        ):
-            return "person"
+    if comparison_query and (organization_query_score >= 1 or organization_support_score >= 1):
+        return "organization"
 
     if any(token in ORGANIZATION_TERMS for token in filtered_tokens):
         return "organization"
@@ -358,10 +373,27 @@ def infer_query_archetype(
     if technology_query_score >= 2 or technology_support_score >= 3:
         return "technology"
 
+    if has_mount_prefix or place_query_score >= 2:
+        return "place"
     if any(token in PLACE_TERMS for token in filtered_tokens):
         return "place"
     if place_support_score >= 2:
         return "place"
+    if comparison_query and title_case_ratio >= 0.4:
+        return "generic"
+    if person_support:
+        return "person"
+    if 2 <= len(raw_tokens) <= 4:
+        if (
+            title_case_ratio >= 0.85
+            and not comparison_query
+            and not any(token in QUESTION_WORDS for token in lowered_tokens)
+            and not any(token in ORGANIZATION_TERMS for token in lowered_tokens)
+            and not any(token in PLACE_TERMS for token in lowered_tokens)
+            and not any(token in PLACE_QUERY_TERMS for token in lowered_tokens)
+            and not has_mount_prefix
+        ):
+            return "person"
     return "generic"
 
 

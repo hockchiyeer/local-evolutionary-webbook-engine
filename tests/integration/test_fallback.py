@@ -84,6 +84,15 @@ class AdaptiveFallbackTests(unittest.TestCase):
         )
         self.assertNotIn("historical development", combined_titles)
 
+    def test_place_query_fallback_uses_place_style_facets(self):
+        results = get_mock_results("Mount Everest")
+        combined_titles = " ".join(result["title"] for result in results[:6]).lower()
+
+        self.assertTrue(
+            any(term in combined_titles for term in ("geographic context", "historical formation", "development challenges", "long-term outlook"))
+        )
+        self.assertNotIn("background and identity", combined_titles)
+
     def test_strong_real_frontier_does_not_trigger_fallback(self):
         query = "grid resilience planning"
         decision = should_supplement_with_fallback(
