@@ -69,12 +69,14 @@ export interface Chapter {
 export interface ChapterFeedback {
   signal: FeedbackSignal | null;
   issueTags: FeedbackIssueTag[];
+  customTags: string[];
   updatedAt: number | null;
 }
 
 export interface WebBookFeedback {
   bookSignal: FeedbackSignal | null;
   issueTags: FeedbackIssueTag[];
+  customTags: string[];
   chapterFeedback: Record<string, ChapterFeedback>;
   updatedAt: number | null;
 }
@@ -96,6 +98,7 @@ export interface RewardProfile {
   positiveSignals: number;
   negativeSignals: number;
   dominantIssues: FeedbackIssueTag[];
+  dominantCustomTags: string[];
   weights: RewardWeightProfile;
   updatedAt: number | null;
 }

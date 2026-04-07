@@ -135,6 +135,8 @@ const FEEDBACK_WEIGHT_IMPACT: Record<FeedbackIssueTag, Partial<RewardWeightProfi
 const clampRewardWeight = (value: number) => Number(Math.min(1.35, Math.max(0.82, value)).toFixed(3));
 
 const cloneRewardWeights = (): RewardWeightProfile => ({ ...DEFAULT_REWARD_WEIGHTS });
+const normalizeCustomTagValue = (value: string) => value.trim().replace(/\s+/g, " ").slice(0, 48);
+const customTagKey = (value: string) => normalizeCustomTagValue(value).toLowerCase();
 
 const isFeedbackSignal = (value: unknown): value is FeedbackSignal => value === "positive" || value === "negative";
 
@@ -145,9 +147,85 @@ const normalizeIssueTags = (value: unknown): FeedbackIssueTag[] => {
   return Array.from(new Set(value.filter(isFeedbackIssueTag)));
 };
 
+const normalizeCustomTags = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+
+  const seen = new Set<string>();
+  const normalizedTags: string[] = [];
+
+  value.forEach((entry) => {
+    if (typeof entry !== "string") {
+      return;
+    }
+
+    const normalized = normalizeCustomTagValue(entry);
+    const key = customTagKey(normalized);
+    if (!normalized || seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    normalizedTags.push(normalized);
+  });
+
+  return normalizedTags.slice(0, 12);
+};
+
+const applyRewardDelta = (
+  weights: RewardWeightProfile,
+  deltas: Partial<RewardWeightProfile>,
+) => {
+  Object.entries(deltas).forEach(([metric, delta]) => {
+    const key = metric as keyof RewardWeightProfile;
+    weights[key] += Number(delta || 0);
+  });
+};
+
+const inferCustomTagImpact = (tag: string): Partial<RewardWeightProfile> => {
+  const normalized = customTagKey(tag);
+  const impact: Partial<RewardWeightProfile> = {};
+
+  const addImpact = (key: keyof RewardWeightProfile, delta: number) => {
+    impact[key] = Number((impact[key] || 0) + delta);
+  };
+
+  if (/(generic|vague|broad|surface|shallow)/.test(normalized)) {
+    addImpact("relevance", 0.08);
+    addImpact("coverage", 0.04);
+    addImpact("titleSpecificity", 0.08);
+  }
+  if (/(repeat|repetitive|redundan|duplicate|loop|same)/.test(normalized)) {
+    addImpact("diversity", 0.12);
+    addImpact("antiRedundancy", 0.12);
+  }
+  if (/(evidence|source|citation|reference|unsupported|hallucin|accuracy|factual)/.test(normalized)) {
+    addImpact("authority", 0.1);
+    addImpact("evidenceDensity", 0.12);
+  }
+  if (/(title|heading|headline|naming|name)/.test(normalized)) {
+    addImpact("titleSpecificity", 0.14);
+    addImpact("relevance", 0.04);
+  }
+  if (/(structure|flow|order|sequence|logic|organization|organisation|outline)/.test(normalized)) {
+    addImpact("structure", 0.12);
+    addImpact("coherence", 0.08);
+  }
+  if (/(synthesis|insight|connection|compare|comparison|causal|context|analysis)/.test(normalized)) {
+    addImpact("coherence", 0.08);
+    addImpact("diversity", 0.05);
+  }
+  if (/(detail|depth|specific|granular|nuance)/.test(normalized)) {
+    addImpact("coverage", 0.05);
+    addImpact("evidenceDensity", 0.07);
+  }
+
+  return impact;
+};
+
 const createEmptyChapterFeedback = (): ChapterFeedback => ({
   signal: null,
   issueTags: [],
+  customTags: [],
   updatedAt: null,
 });
 
@@ -160,6 +238,7 @@ const normalizeChapterFeedback = (value: unknown): ChapterFeedback => {
   return {
     signal: isFeedbackSignal(candidate.signal) ? candidate.signal : null,
     issueTags: normalizeIssueTags(candidate.issueTags),
+    customTags: normalizeCustomTags(candidate.customTags),
     updatedAt: typeof candidate.updatedAt === "number" ? candidate.updatedAt : null,
   };
 };
@@ -186,6 +265,7 @@ const normalizeChapter = (chapter: Chapter | Record<string, unknown>, bookId: st
 const createEmptyWebBookFeedback = (chapters: Chapter[]): WebBookFeedback => ({
   bookSignal: null,
   issueTags: [],
+  customTags: [],
   chapterFeedback: Object.fromEntries(chapters.map((chapter, index) => [chapter.id || `chapter-${index + 1}`, createEmptyChapterFeedback()])),
   updatedAt: null,
 });
@@ -221,18 +301,20 @@ export const normalizeRewardProfile = (value: unknown): RewardProfile => {
       positiveSignals: 0,
       negativeSignals: 0,
       dominantIssues: [],
+      dominantCustomTags: [],
       weights: cloneRewardWeights(),
       updatedAt: null,
     };
   }
 
   const candidate = value as Partial<RewardProfile>;
-  const rawWeights = candidate.weights || {};
+  const rawWeights = (candidate.weights || {}) as Partial<RewardWeightProfile>;
   return {
     sampleSize: Number(candidate.sampleSize || 0),
     positiveSignals: Number(candidate.positiveSignals || 0),
     negativeSignals: Number(candidate.negativeSignals || 0),
     dominantIssues: normalizeIssueTags(candidate.dominantIssues).slice(0, 3),
+    dominantCustomTags: normalizeCustomTags(candidate.dominantCustomTags).slice(0, 4),
     weights: {
       relevance: clampRewardWeight(Number(rawWeights.relevance || 1)),
       coverage: clampRewardWeight(Number(rawWeights.coverage || 1)),
@@ -280,6 +362,7 @@ export const normalizeWebBook = (value: WebBook | Record<string, unknown>): WebB
     feedback: {
       bookSignal: rawFeedback && isFeedbackSignal(rawFeedback.bookSignal) ? rawFeedback.bookSignal : fallbackFeedback.bookSignal,
       issueTags: rawFeedback ? normalizeIssueTags(rawFeedback.issueTags) : [],
+      customTags: rawFeedback ? normalizeCustomTags(rawFeedback.customTags) : [],
       chapterFeedback,
       updatedAt: rawFeedback && typeof rawFeedback.updatedAt === "number" ? rawFeedback.updatedAt : null,
     },
@@ -290,6 +373,7 @@ export const normalizeWebBook = (value: WebBook | Record<string, unknown>): WebB
 export const buildRewardProfileFromHistory = (history: WebBook[]): RewardProfile => {
   const weights = cloneRewardWeights();
   const issueCounts = new Map<FeedbackIssueTag, number>();
+  const customTagCounts = new Map<string, { label: string; count: number }>();
   let sampleSize = 0;
   let positiveSignals = 0;
   let negativeSignals = 0;
@@ -307,9 +391,14 @@ export const buildRewardProfileFromHistory = (history: WebBook[]): RewardProfile
       ...(feedback?.issueTags || []),
       ...chapterFeedbackEntries.flatMap((entry) => entry.issueTags),
     ];
+    const allCustomTags = [
+      ...(feedback?.customTags || []),
+      ...chapterFeedbackEntries.flatMap((entry) => entry.customTags),
+    ];
     const uniqueIssueTags = Array.from(new Set(allIssueTags));
+    const uniqueCustomTags = normalizeCustomTags(allCustomTags);
     const hasSignal = feedbackSignals.length > 0;
-    const hasIssues = uniqueIssueTags.length > 0;
+    const hasIssues = uniqueIssueTags.length > 0 || uniqueCustomTags.length > 0;
 
     if (!hasSignal && !hasIssues) {
       return;
@@ -324,11 +413,18 @@ export const buildRewardProfileFromHistory = (history: WebBook[]): RewardProfile
 
     uniqueIssueTags.forEach((tag) => {
       issueCounts.set(tag, (issueCounts.get(tag) || 0) + 1);
-      const impact = FEEDBACK_WEIGHT_IMPACT[tag];
-      Object.entries(impact).forEach(([metric, delta]) => {
-        const key = metric as keyof RewardWeightProfile;
-        weights[key] += Number(delta || 0);
-      });
+      applyRewardDelta(weights, FEEDBACK_WEIGHT_IMPACT[tag]);
+    });
+
+    uniqueCustomTags.forEach((tag) => {
+      const normalizedKey = customTagKey(tag);
+      const current = customTagCounts.get(normalizedKey);
+      if (current) {
+        current.count += 1;
+      } else {
+        customTagCounts.set(normalizedKey, { label: tag, count: 1 });
+      }
+      applyRewardDelta(weights, inferCustomTagImpact(tag));
     });
 
     if (feedback?.bookSignal === "positive") {
@@ -368,12 +464,17 @@ export const buildRewardProfileFromHistory = (history: WebBook[]): RewardProfile
     })
     .slice(0, 3)
     .map(([tag]) => tag);
+  const dominantCustomTags = Array.from(customTagCounts.values())
+    .sort((left, right) => right.count - left.count)
+    .slice(0, 4)
+    .map((entry) => entry.label);
 
   return {
     sampleSize,
     positiveSignals,
     negativeSignals,
     dominantIssues,
+    dominantCustomTags,
     weights: {
       relevance: clampRewardWeight(weights.relevance),
       coverage: clampRewardWeight(weights.coverage),
@@ -387,6 +488,21 @@ export const buildRewardProfileFromHistory = (history: WebBook[]): RewardProfile
     },
     updatedAt: latestUpdatedAt,
   };
+};
+
+const hasPersistableFeedback = (book: WebBook) => {
+  const feedback = book.feedback;
+  if (!feedback) {
+    return false;
+  }
+
+  if (feedback.bookSignal || feedback.issueTags.length > 0 || feedback.customTags.length > 0) {
+    return true;
+  }
+
+  return Object.values(feedback.chapterFeedback).some(
+    (entry) => entry.signal || entry.issueTags.length > 0 || entry.customTags.length > 0,
+  );
 };
 
 export const EXECUTION_MODE_CARDS: Array<{
@@ -686,7 +802,13 @@ export function useWebBookEngine() {
   const [notice, setNotice] = useState<string | null>(null);
   const [history, setHistory] = useState<WebBook[]>([]);
   const [artifacts, setArtifacts] = useState<ArtifactsState>(EMPTY_ARTIFACTS);
-  const rewardProfile = buildRewardProfileFromHistory(history);
+  const [persistentRewardProfile, setPersistentRewardProfile] = useState<RewardProfile | null>(null);
+  const [hasLoadedPersistentRewardProfile, setHasLoadedPersistentRewardProfile] = useState(false);
+  const [hasBootstrappedPersistentFeedback, setHasBootstrappedPersistentFeedback] = useState(false);
+  const localRewardProfile = buildRewardProfileFromHistory(history);
+  const rewardProfile = persistentRewardProfile && persistentRewardProfile.sampleSize > 0
+    ? persistentRewardProfile
+    : localRewardProfile;
 
   // Load history & config from localStorage
   useEffect(() => {
@@ -718,22 +840,110 @@ export function useWebBookEngine() {
     localStorage.setItem(SOURCE_PORTAL_STORAGE_KEY, JSON.stringify(sourceConfig));
   }, [sourceConfig]);
 
-  const syncBookMutation = (bookId: string, mutate: (book: WebBook) => WebBook) => {
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPersistentLearningProfile = async () => {
+      try {
+        const { getPersistentRewardProfile } = await import('../services/evolutionService');
+        const response = await getPersistentRewardProfile();
+        if (cancelled) return;
+        setPersistentRewardProfile(normalizeRewardProfile(response.rewardProfile));
+      } catch (loadError) {
+        console.error("Failed to load persistent learning profile", loadError);
+      } finally {
+        if (!cancelled) {
+          setHasLoadedPersistentRewardProfile(true);
+        }
+      }
+    };
+
+    void loadPersistentLearningProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedPersistentRewardProfile || hasBootstrappedPersistentFeedback) {
+      return;
+    }
+
+    const ratedBooks = history.filter(hasPersistableFeedback);
+    if (ratedBooks.length === 0) {
+      setHasBootstrappedPersistentFeedback(true);
+      return;
+    }
+
+    if (persistentRewardProfile && persistentRewardProfile.sampleSize > 0) {
+      setHasBootstrappedPersistentFeedback(true);
+      return;
+    }
+
+    let cancelled = false;
+
+    const bootstrapPersistentLearning = async () => {
+      try {
+        const { bootstrapPersistentFeedback } = await import('../services/evolutionService');
+        const response = await bootstrapPersistentFeedback(ratedBooks);
+        if (cancelled) return;
+        setPersistentRewardProfile(normalizeRewardProfile(response.rewardProfile));
+      } catch (bootstrapError) {
+        console.error("Failed to bootstrap persistent learning profile", bootstrapError);
+      } finally {
+        if (!cancelled) {
+          setHasBootstrappedPersistentFeedback(true);
+        }
+      }
+    };
+
+    void bootstrapPersistentLearning();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasBootstrappedPersistentFeedback, hasLoadedPersistentRewardProfile, history, persistentRewardProfile]);
+
+  const persistFeedbackSnapshot = async (book: WebBook) => {
+    if (!hasPersistableFeedback(book)) {
+      return;
+    }
+
+    try {
+      const { savePersistentFeedback } = await import('../services/evolutionService');
+      const response = await savePersistentFeedback(book);
+      setPersistentRewardProfile(normalizeRewardProfile(response.rewardProfile));
+      setHasLoadedPersistentRewardProfile(true);
+      setHasBootstrappedPersistentFeedback(true);
+    } catch (persistError) {
+      console.error("Failed to persist feedback snapshot", persistError);
+      setNotice("Feedback was saved locally, but the shared backend learning store could not be updated.");
+    }
+  };
+
+  const applyFeedbackMutation = (bookId: string, mutate: (book: WebBook) => WebBook) => {
+    const sourceBook = webBook?.id === bookId
+      ? normalizeWebBook(webBook)
+      : history.find((item) => item.id === bookId);
+
+    if (!sourceBook) {
+      return;
+    }
+
+    const nextBook = normalizeWebBook(mutate(normalizeWebBook(sourceBook)));
+
     setHistory((currentHistory) =>
       currentHistory.map((item) => (
         item.id === bookId
-          ? normalizeWebBook(mutate(normalizeWebBook(item)))
+          ? nextBook
           : item
       )),
     );
 
-    setWebBook((currentBook) => {
-      if (!currentBook || currentBook.id !== bookId) {
-        return currentBook;
-      }
-
-      return normalizeWebBook(mutate(normalizeWebBook(currentBook)));
-    });
+    if (webBook?.id === bookId) {
+      setWebBook(nextBook);
+    }
 
     setArtifacts((currentArtifacts) => {
       if (!currentArtifacts.assembledBook || currentArtifacts.assembledBook.id !== bookId) {
@@ -742,23 +952,27 @@ export function useWebBookEngine() {
 
       return {
         ...currentArtifacts,
-        assembledBook: normalizeWebBook(mutate(normalizeWebBook(currentArtifacts.assembledBook))),
+        assembledBook: nextBook,
       };
     });
+
+    void persistFeedbackSnapshot(nextBook);
   };
 
   const updateWebBookFeedback = (
     bookId: string,
-    patch: Partial<Pick<WebBookFeedback, "bookSignal" | "issueTags">>,
+    patch: Partial<Pick<WebBookFeedback, "bookSignal" | "issueTags" | "customTags">>,
   ) => {
-    syncBookMutation(bookId, (book) => {
+    applyFeedbackMutation(bookId, (book) => {
       const nextIssueTags = patch.issueTags ? Array.from(new Set(patch.issueTags)) : book.feedback?.issueTags || [];
+      const nextCustomTags = patch.customTags ? normalizeCustomTags(patch.customTags) : book.feedback?.customTags || [];
       return {
         ...book,
         feedback: {
           ...(book.feedback || createEmptyWebBookFeedback(book.chapters)),
           bookSignal: patch.bookSignal === undefined ? (book.feedback?.bookSignal || null) : patch.bookSignal,
           issueTags: nextIssueTags,
+          customTags: nextCustomTags,
           updatedAt: Date.now(),
         },
       };
@@ -770,7 +984,7 @@ export function useWebBookEngine() {
     chapterId: string,
     patch: Partial<ChapterFeedback>,
   ) => {
-    syncBookMutation(bookId, (book) => {
+    applyFeedbackMutation(bookId, (book) => {
       const feedback = book.feedback || createEmptyWebBookFeedback(book.chapters);
       const currentChapterFeedback = normalizeChapterFeedback(feedback.chapterFeedback[chapterId]);
       return {
@@ -782,6 +996,7 @@ export function useWebBookEngine() {
             [chapterId]: {
               signal: patch.signal === undefined ? currentChapterFeedback.signal : patch.signal,
               issueTags: patch.issueTags ? Array.from(new Set(patch.issueTags)) : currentChapterFeedback.issueTags,
+              customTags: patch.customTags ? normalizeCustomTags(patch.customTags) : currentChapterFeedback.customTags,
               updatedAt: Date.now(),
             },
           },

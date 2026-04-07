@@ -1,12 +1,12 @@
 import React from 'react';
-import { ArrowUpRight, BookOpen, CheckCircle2, Image as ImageIcon, Layers, Sparkles, ThumbsDown, ThumbsUp } from 'lucide-react';
+import { ArrowUpRight, BookOpen, CheckCircle2, Image as ImageIcon, Layers, Plus, Sparkles, ThumbsDown, ThumbsUp, X } from 'lucide-react';
 import type { Chapter, ChapterFeedback, FeedbackIssueTag, FeedbackSignal, RewardProfile, WebBook, WebBookFeedback } from '../types';
 import { buildChapterRenderPlan, getChapterSourceLinks, normalizeSourceLink } from '../utils/webBookRender';
 
 interface WebBookViewerProps {
   webBook: WebBook;
   rewardProfile: RewardProfile;
-  onUpdateWebBookFeedback: (bookId: string, patch: Partial<Pick<WebBookFeedback, 'bookSignal' | 'issueTags'>>) => void;
+  onUpdateWebBookFeedback: (bookId: string, patch: Partial<Pick<WebBookFeedback, 'bookSignal' | 'issueTags' | 'customTags'>>) => void;
   onUpdateChapterFeedback: (bookId: string, chapterId: string, patch: Partial<ChapterFeedback>) => void;
 }
 
@@ -42,6 +42,9 @@ const BOOK_FEEDBACK_TAGS: FeedbackIssueTag[] = [
   'insightful_synthesis',
 ];
 
+const normalizeCustomFeedbackTag = (value: string) => value.trim().replace(/\s+/g, ' ').slice(0, 48);
+const customFeedbackTagKey = (value: string) => normalizeCustomFeedbackTag(value).toLowerCase();
+
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const stripChapterPrefix = (value: string) => value.replace(/^Chapter\s+\d+:\s*/i, '').trim();
@@ -68,6 +71,7 @@ export function WebBookViewer({
   onUpdateWebBookFeedback,
   onUpdateChapterFeedback,
 }: WebBookViewerProps) {
+  const [customTagInput, setCustomTagInput] = React.useState('');
   const chapterRenderPlan = buildChapterRenderPlan(webBook.chapters);
   const finalDocumentPageNumber = chapterRenderPlan.length > 0
     ? (chapterRenderPlan[chapterRenderPlan.length - 1].analysisPageNumber ?? chapterRenderPlan[chapterRenderPlan.length - 1].titlePageNumber) + 1
@@ -76,9 +80,11 @@ export function WebBookViewer({
   const topicAreaLabel = TOPIC_AREA_LABELS[topicAreaKey] || TOPIC_AREA_LABELS.generic;
   const feedback = webBook.feedback;
   const activeIssueTags = new Set(feedback?.issueTags || []);
+  const customTags = feedback?.customTags || [];
   const dominantIssueSummary = rewardProfile.dominantIssues
     .map((tag) => FEEDBACK_TAG_LABELS[tag])
     .join(' | ');
+  const dominantCustomTagSummary = rewardProfile.dominantCustomTags.join(' | ');
 
   const toggleBookSignal = (signal: FeedbackSignal) => {
     onUpdateWebBookFeedback(webBook.id, {
@@ -92,6 +98,29 @@ export function WebBookViewer({
       : [...(feedback?.issueTags || []), tag];
     onUpdateWebBookFeedback(webBook.id, {
       issueTags: nextIssueTags,
+    });
+  };
+
+  const addCustomTag = () => {
+    const normalized = normalizeCustomFeedbackTag(customTagInput);
+    if (!normalized) {
+      return;
+    }
+
+    const currentTags = feedback?.customTags || [];
+    const nextTags = currentTags.some((tag) => customFeedbackTagKey(tag) === customFeedbackTagKey(normalized))
+      ? currentTags
+      : [...currentTags, normalized];
+
+    onUpdateWebBookFeedback(webBook.id, {
+      customTags: nextTags,
+    });
+    setCustomTagInput('');
+  };
+
+  const removeCustomTag = (tagToRemove: string) => {
+    onUpdateWebBookFeedback(webBook.id, {
+      customTags: (feedback?.customTags || []).filter((tag) => customFeedbackTagKey(tag) !== customFeedbackTagKey(tagToRemove)),
     });
   };
 
@@ -123,6 +152,7 @@ export function WebBookViewer({
             {dominantIssueSummary
               ? `Current pressure is strongest around ${dominantIssueSummary}.`
               : 'Positive and negative ratings are already nudging the next scoring pass.'}
+            {dominantCustomTagSummary ? ` Custom themes: ${dominantCustomTagSummary}.` : ''}
           </div>
         )}
 
@@ -175,6 +205,54 @@ export function WebBookViewer({
                 );
               })}
             </div>
+
+            <div className="mt-5 rounded-[18px] border border-[#e0d5c7] bg-white/70 p-4">
+              <div className="text-[10px] uppercase tracking-[0.22em] text-[#8a7b67]">Custom Tags</div>
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+                <input
+                  type="text"
+                  value={customTagInput}
+                  onChange={(event) => setCustomTagInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      addCustomTag();
+                    }
+                  }}
+                  placeholder="e.g. weak chronology, missing citations, better comparisons"
+                  className="min-w-0 flex-1 rounded-full border border-[#d8ccbd] bg-[#fffdf8] px-4 py-2 text-sm text-[#1d1710] outline-none transition focus:border-[#1d1710]"
+                />
+                <button
+                  type="button"
+                  onClick={addCustomTag}
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-[#1d1710] px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#1d1710] transition hover:bg-[#1d1710] hover:text-[#fffaf2]"
+                >
+                  <Plus size={12} />
+                  Add Tag
+                </button>
+              </div>
+
+              {customTags.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {customTags.map((tag) => (
+                    <div
+                      key={tag}
+                      className="inline-flex items-center gap-2 rounded-full border border-[#1d1710] bg-[#1d1710] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#fffaf2]"
+                    >
+                      <span>{tag}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeCustomTag(tag)}
+                        title={`Remove custom tag ${tag}`}
+                        className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-white/20 text-[#fffaf2] transition hover:border-[#efb8b8] hover:bg-[#8c2f2f] hover:text-white"
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="rounded-[22px] border border-[#e0d5c7] bg-[#fffdf7] p-5">
@@ -189,13 +267,13 @@ export function WebBookViewer({
                   <div key={chapterId} className="rounded-[18px] border border-[#e0d5c7] bg-white p-3">
                     <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">{heading.sequence}</div>
                     <div className="mt-2 line-clamp-2 text-sm font-semibold leading-5 text-[#1d1710]">{heading.displayTitle}</div>
-                    <div className="mt-3 flex gap-2">
+                    <div className="mt-3 grid grid-cols-2 gap-2">
                       <button
                         type="button"
                         onClick={() => onUpdateChapterFeedback(webBook.id, chapterId, {
                           signal: chapterFeedback?.signal === 'positive' ? null : 'positive',
                         })}
-                        className={`inline-flex flex-1 items-center justify-center gap-2 rounded-full border px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] transition ${
+                        className={`inline-flex min-w-0 w-full items-center justify-center gap-1.5 rounded-full border px-2 py-2 text-[9px] font-semibold uppercase tracking-[0.16em] transition ${
                           chapterFeedback?.signal === 'positive'
                             ? 'border-[#245c39] bg-[#e8f6ea] text-[#1f4f31]'
                             : 'border-[#d8ccbd] bg-[#fffaf7] text-[#6b5b4a] hover:border-[#245c39] hover:text-[#1f4f31]'
@@ -209,7 +287,7 @@ export function WebBookViewer({
                         onClick={() => onUpdateChapterFeedback(webBook.id, chapterId, {
                           signal: chapterFeedback?.signal === 'negative' ? null : 'negative',
                         })}
-                        className={`inline-flex flex-1 items-center justify-center gap-2 rounded-full border px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] transition ${
+                        className={`inline-flex min-w-0 w-full items-center justify-center gap-1.5 rounded-full border px-2 py-2 text-[9px] font-semibold uppercase tracking-[0.16em] transition ${
                           chapterFeedback?.signal === 'negative'
                             ? 'border-[#8c2f2f] bg-[#fdecec] text-[#7a2727]'
                             : 'border-[#d8ccbd] bg-[#fffaf7] text-[#6b5b4a] hover:border-[#8c2f2f] hover:text-[#7a2727]'
