@@ -5,6 +5,7 @@ import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
 import cors from "cors";
+import { persistentFeedbackStore } from "./feedbackStore";
 import type { ChapterFeedback, FeedbackIssueTag, FeedbackSignal, RewardProfile, RewardWeightProfile, WebBookFeedback } from "./src/types";
 
 type PersistedFeedbackChapter = {
@@ -629,45 +630,13 @@ const writeLearningStore = (store: PersistedLearningStore) => {
   fs.renameSync(tempPath, LEARNING_STORE_PATH);
 };
 
-const resolveEffectiveRewardProfile = (candidate: unknown): RewardProfile => {
-  const normalizedCandidate = normalizeRewardProfile(candidate);
-  if (normalizedCandidate.sampleSize > 0) {
-    return normalizedCandidate;
-  }
+const resolveEffectiveRewardProfile = (candidate: unknown): RewardProfile => (
+  persistentFeedbackStore.resolveEffectiveRewardProfile(candidate)
+);
 
-  return readLearningStore().rewardProfile;
-};
-
-const upsertLearningRecords = (entries: unknown[]) => {
-  const store = readLearningStore();
-  const source = entries.length > 1 ? "bootstrap" : "upsert";
-
-  entries.forEach((entry) => {
-    const normalized = normalizePersistedFeedbackRecord(entry);
-    if (!normalized) {
-      return;
-    }
-
-    const existingRecord = store.records[normalized.id];
-    const mergedRecord = mergeFeedbackRecords(existingRecord, normalized);
-    store.records[normalized.id] = mergedRecord;
-
-    if (shouldAppendFeedbackEvent(existingRecord, mergedRecord)) {
-      store.feedbackEvents.push(buildFeedbackEventFromRecord(mergedRecord, source));
-    }
-  });
-
-  store.rewardProfile = buildRewardProfileFromPersistedRecords(Object.values(store.records));
-  store.updatedAt = Date.now();
-  writeLearningStore(store);
-
-  return {
-    rewardProfile: store.rewardProfile,
-    recordCount: Object.keys(store.records).length,
-    feedbackEventCount: store.feedbackEvents.length,
-    updatedAt: store.updatedAt,
-  };
-};
+const upsertLearningRecords = (entries: unknown[]) => (
+  persistentFeedbackStore.upsertLearningRecords(entries)
+);
 
 async function startServer() {
   const app = express();
@@ -675,9 +644,9 @@ async function startServer() {
   const SEARCH_REQUEST_TIMEOUT_MS = 420000;
   const EXTENDED_REQUEST_TIMEOUT_MS = 480000;
 
-  // Normalize and migrate the learning store on startup so older schemas are
-  // rewritten into the current durable format before any new feedback arrives.
-  writeLearningStore(readLearningStore());
+  // Bring the persistent feedback store online before requests start so
+  // adaptive reward profiles and JSON-to-SQLite migration are ready.
+  persistentFeedbackStore.initialize();
 
   app.use(cors());
   app.use(express.json({ limit: "10mb" }));
@@ -706,12 +675,7 @@ async function startServer() {
   });
 
   app.post("/api/feedback/profile", (_req, res) => {
-    const store = readLearningStore();
-    res.json({
-      rewardProfile: store.rewardProfile,
-      recordCount: Object.keys(store.records).length,
-      updatedAt: store.updatedAt,
-    });
+    res.json(persistentFeedbackStore.getSummary());
   });
 
   app.post("/api/feedback/upsert", (req, res) => {
