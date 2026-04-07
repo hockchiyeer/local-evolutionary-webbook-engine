@@ -7,9 +7,9 @@
     "dev": "tsx server.ts",
     "build": "vite build",
     "preview": "vite preview",
-    "clean": "node clean-safe.mjs",
+    "clean": "node scripts/clean-safe.mjs",
     "lint": "tsc --noEmit",
-    "test:clean": "node clean.test.mjs"
+    "test:clean": "node scripts/clean-test.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

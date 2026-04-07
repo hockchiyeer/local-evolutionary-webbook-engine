@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
-const { main } = await import(pathToFileURL(path.join(repoRoot, "clean-safe.mjs")).href);
+const { main } = await import(new URL("./clean-safe.mjs", import.meta.url).href);
 
 async function exists(targetPath) {
   try {

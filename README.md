@@ -118,37 +118,88 @@ The portal UI now exposes the real runtime model:
 - `engine/nlp.py` and related modules for local semantic analysis
 - `engine/organize.py` and `engine/titles.py` for chapter shaping and title generation
 
-## Key Files
+## Repository Structure
 
 ```text
 .
+|-- data/
+|   `-- .gitignore
 |-- engine/
+|   |-- __init__.py
+|   |-- archetypes.py
+|   |-- benchmarks.py
+|   |-- contracts.py
 |   |-- fallback.py
 |   |-- features.py
 |   |-- fitness.py
 |   |-- ga.py
 |   |-- nlp.py
+|   |-- nlp_graph.py
 |   |-- normalize.py
 |   |-- organize.py
+|   |-- query_profiles.py
+|   |-- reinforcement.py
 |   |-- search.py
 |   `-- titles.py
+|-- scripts/
+|   |-- clean.mjs
+|   |-- clean-safe.mjs
+|   `-- clean-test.mjs
 |-- src/
 |   |-- components/
-|   |-- hooks/useWebBookEngine.ts
-|   |-- services/evolutionService.ts
-|   |-- services/exportService.ts
-|   `-- App.tsx
+|   |   |-- AppHeader.tsx
+|   |   |-- ControlSidebar.tsx
+|   |   |-- HistoryDrawer.tsx
+|   |   `-- WebBookViewer.tsx
+|   |-- hooks/
+|   |   `-- useWebBookEngine.ts
+|   |-- services/
+|   |   |-- evolutionService.ts
+|   |   `-- exportService.ts
+|   |-- utils/
+|   |   `-- webBookRender.ts
+|   |-- App.tsx
+|   |-- index.css
+|   |-- main.tsx
+|   `-- types.ts
 |-- tests/
+|   |-- __init__.py
 |   |-- integration/
+|   |   |-- __init__.py
+|   |   |-- test_benchmark_queries.py
+|   |   |-- test_engine_contracts.py
+|   |   |-- test_fallback.py
+|   |   |-- test_pipeline_regression.py
+|   |   `-- test_query_focus.py
 |   |-- smoke/
+|   |   |-- __init__.py
+|   |   |-- test_malaysia_search.py
+|   |   |-- test_python.py
+|   |   `-- test_wikipedia.py
 |   `-- unit/
+|       |-- __init__.py
+|       |-- test_features.py
+|       |-- test_fitness.py
+|       |-- test_ga.py
+|       |-- test_nlp.py
+|       |-- test_organize.py
+|       |-- test_search_normalize.py
+|       `-- test_webbook_titles.py
+|-- .env.example
+|-- .gitignore
+|-- CHANGELOG.md
+|-- LICENSE.txt
+|-- README.md
 |-- evolution_engine.py
 |-- feedbackStore.ts
-|-- server.ts
+|-- index.html
+|-- metadata.json
+|-- package-lock.json
 |-- package.json
 |-- requirements.txt
-|-- .env.example
-`-- README.md
+|-- server.ts
+|-- tsconfig.json
+`-- vite.config.ts
 ```
 
 ## Setup

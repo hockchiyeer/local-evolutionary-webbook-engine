@@ -1,6 +1,6 @@
 import { readdir, rm } from "node:fs/promises";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const topLevelTargets = [
   "dist",
@@ -29,6 +29,8 @@ const protectedExactRelativePaths = new Set([
   "data/feedback-learning.sqlite-wal",
   "data/feedback-learning.sqlite.bak",
 ]);
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const defaultTargetRoot = path.resolve(scriptDir, "..");
 
 function toRelativePosix(rootDir, targetPath) {
   return path.relative(rootDir, path.resolve(targetPath)).split(path.sep).join("/");
@@ -91,7 +93,7 @@ async function findGeneratedArtifacts(rootDir, currentDir, foundPaths) {
   }
 }
 
-export async function main(targetRoot = process.cwd()) {
+export async function main(targetRoot = defaultTargetRoot) {
   const rootDir = path.resolve(targetRoot);
   const removedPaths = new Set();
 
