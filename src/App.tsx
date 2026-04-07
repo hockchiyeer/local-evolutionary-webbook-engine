@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useWebBookEngine } from './hooks/useWebBookEngine';
 import { ControlSidebar } from './components/ControlSidebar';
 import { AppHeader } from './components/AppHeader';
@@ -12,17 +12,91 @@ import { WebBookViewer } from './components/WebBookViewer';
 import { exportWebBookToPdf, printWebBook, exportWebBookToWord, exportWebBookToHtml, exportWebBookToTxt } from './services/exportService';
 import { motion, AnimatePresence } from 'motion/react';
 import { Infinity as InfinityIcon } from 'lucide-react';
-
 const formatElapsed = (runtimeMs: number | null) => (runtimeMs ? `${Math.max(1, Math.round(runtimeMs / 1000))}s` : '0s');
 type LoadingStageState = 'idle' | 'queued' | 'active' | 'complete' | 'error';
+const FINAL_ASSEMBLY_STAGE_HOLD_MS = 1800;
 
 export default function App() {
+  const engine = useWebBookEngine();
   const [showHistory, setShowHistory] = useState(false);
   const [showArtifacts, setShowArtifacts] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isHoldingStageCompletion, setIsHoldingStageCompletion] = useState(false);
+  const [, setTick] = useState(0);
+  const previousStatusRef = useRef(engine.state.status);
+  const revealTimeoutRef = useRef<number | null>(null);
+  const revealedBookIdRef = useRef<string | null>(engine.webBook?.id ?? null);
 
-  const engine = useWebBookEngine();
-  const runtimeMs = engine.artifacts.startedAt ? (engine.artifacts.updatedAt ?? Date.now()) - engine.artifacts.startedAt : null;
+  useLayoutEffect(() => {
+    const previousStatus = previousStatusRef.current;
+    const currentStatus = engine.state.status;
+    const nextBookId = engine.webBook?.id ?? null;
+
+    if (revealTimeoutRef.current !== null) {
+      window.clearTimeout(revealTimeoutRef.current);
+      revealTimeoutRef.current = null;
+    }
+
+    if (!nextBookId) {
+      revealedBookIdRef.current = null;
+      setIsHoldingStageCompletion(false);
+      previousStatusRef.current = currentStatus;
+      return;
+    }
+
+    const shouldHoldAssemblyReveal = (
+      previousStatus === 'assembling'
+      && currentStatus === 'complete'
+      && revealedBookIdRef.current !== nextBookId
+    );
+
+    if (shouldHoldAssemblyReveal) {
+      setIsHoldingStageCompletion(true);
+      revealTimeoutRef.current = window.setTimeout(() => {
+        revealedBookIdRef.current = nextBookId;
+        setIsHoldingStageCompletion(false);
+        revealTimeoutRef.current = null;
+      }, FINAL_ASSEMBLY_STAGE_HOLD_MS);
+    } else {
+      revealedBookIdRef.current = nextBookId;
+      setIsHoldingStageCompletion(false);
+    }
+
+    previousStatusRef.current = currentStatus;
+  }, [engine.state.status, engine.webBook?.id]);
+
+  useEffect(() => () => {
+    if (revealTimeoutRef.current !== null) {
+      window.clearTimeout(revealTimeoutRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    const isRunning = engine.state.status === 'searching' || 
+                      engine.state.status === 'evolving' || 
+                      engine.state.status === 'assembling';
+    
+    if (!isRunning) return;
+
+    const interval = setInterval(() => {
+      setTick((t) => t + 1);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [engine.state.status]);
+
+  const activeWebBook = (
+    engine.webBook
+    && (!isHoldingStageCompletion || revealedBookIdRef.current === engine.webBook.id)
+  )
+    ? engine.webBook
+    : null;
+  const isRunning = engine.state.status === 'searching' || 
+                    engine.state.status === 'evolving' || 
+                    engine.state.status === 'assembling';
+  const runtimeMs = engine.artifacts.startedAt 
+    ? (isRunning ? Date.now() : (engine.artifacts.updatedAt ?? Date.now())) - engine.artifacts.startedAt 
+    : null;
   const completedProviders = engine.artifacts.providerStatuses.filter((status) => status.status === 'complete' || status.status === 'error').length;
   const totalProviders = engine.artifacts.providerStatuses.length;
   const frontierCount = engine.artifacts.searchResults.length;
@@ -83,7 +157,9 @@ export default function App() {
       orbitDuration: '4s',
     },
   ];
-  const activeStageDetail = engine.state.status === 'searching'
+  const activeStageDetail = isHoldingStageCompletion
+    ? 'The draft is assembled. Holding the final stage for a beat so the assembly node can fully resolve before the WebBook opens.'
+    : engine.state.status === 'searching'
     ? 'The engine is gathering public-web, book, and scholarly evidence before it ranks the frontier.'
     : engine.state.status === 'evolving'
       ? 'The local GA is scoring candidate sources, penalizing redundancy, and selecting the strongest evidence mix.'
@@ -110,74 +186,74 @@ export default function App() {
   ];
 
   const handleExportPdf = async () => {
-    if (!engine.webBook) return;
+    if (!activeWebBook) return;
     setIsExporting(true);
     try {
-      await exportWebBookToPdf(engine.webBook);
+      await exportWebBookToPdf(activeWebBook);
     } finally {
       setIsExporting(false);
     }
   };
 
   const handleExportPrint = async () => {
-    if (!engine.webBook) return;
+    if (!activeWebBook) return;
     setIsExporting(true);
     try {
-      await printWebBook(engine.webBook);
+      await printWebBook(activeWebBook);
     } finally {
       setIsExporting(false);
     }
   };
 
   const handleExportWord = async () => {
-    if (!engine.webBook) return;
+    if (!activeWebBook) return;
     setIsExporting(true);
     try {
-      await exportWebBookToWord(engine.webBook);
+      await exportWebBookToWord(activeWebBook);
     } finally {
       setIsExporting(false);
     }
   };
 
   const handleExportHtml = async () => {
-    if (!engine.webBook) return;
+    if (!activeWebBook) return;
     setIsExporting(true);
     try {
-      await exportWebBookToHtml(engine.webBook);
+      await exportWebBookToHtml(activeWebBook);
     } finally {
       setIsExporting(false);
     }
   };
 
   const handleExportTxt = async () => {
-    if (!engine.webBook) return;
+    if (!activeWebBook) return;
     setIsExporting(true);
     try {
-      await exportWebBookToTxt(engine.webBook);
+      await exportWebBookToTxt(activeWebBook);
     } finally {
       setIsExporting(false);
     }
   };
 
-const stageColorMap: Record<string, { active: string; complete: string }> = {
-  'Source Discovery': {
-    active: '#141414',
-    complete: '#141414',
-  },
-  'Evolutionary Selection': {
-    active: '#8b5cf6',
-    complete: '#8b5cf6',
-  },
-  'NLP Book Assembly': {
-    active: '#22c55e',
-    complete: '#22c55e',
-  },
-};
+  const stageColorMap: Record<string, { active: string; complete: string }> = {
+    'Source Discovery': {
+      active: '#141414',
+      complete: '#141414',
+    },
+    'Evolutionary Selection': {
+      active: '#8b5cf6',
+      complete: '#8b5cf6',
+    },
+    'NLP Book Assembly': {
+      active: '#22c55e',
+      complete: '#22c55e',
+    },
+  };
 
   return (
     <div className="min-h-screen bg-[#E4E3E0] text-[#141414] font-sans selection:bg-[#141414] selection:text-[#E4E3E0]">
       <AppHeader
-        webBook={engine.webBook}
+        webBook={activeWebBook}
         isExporting={isExporting}
         onNewSearch={engine.startNewSearch}
         onToggleHistory={() => setShowHistory(!showHistory)}
@@ -207,7 +283,7 @@ const stageColorMap: Record<string, { active: string; complete: string }> = {
           state={engine.state}
           error={engine.error}
           notice={engine.notice}
-          artifacts={engine.artifacts}
+          artifacts={engine.artifacts} runtimeMs={runtimeMs}
           showArtifacts={showArtifacts}
           onToggleArtifacts={() => setShowArtifacts(!showArtifacts)}
           onSearch={engine.runSearch}
@@ -224,7 +300,7 @@ const stageColorMap: Record<string, { active: string; complete: string }> = {
 
         <div className="lg:col-span-8 space-y-8 flex flex-col min-h-[60vh] relative w-full overflow-hidden print:overflow-visible">
           <AnimatePresence mode="popLayout">
-            {engine.webBook ? (
+            {activeWebBook ? (
               <motion.div
                 key="web-book"
                 initial={{ opacity: 0, y: 20 }}
@@ -233,7 +309,7 @@ const stageColorMap: Record<string, { active: string; complete: string }> = {
                 className="w-full flex justify-center"
               >
                 <WebBookViewer
-                  webBook={engine.webBook}
+                  webBook={activeWebBook}
                   rewardProfile={engine.rewardProfile}
                   onUpdateWebBookFeedback={engine.updateWebBookFeedback}
                   onUpdateChapterFeedback={engine.updateChapterFeedback}

@@ -257,23 +257,23 @@ export function WebBookViewer({
 
           <div className="rounded-[22px] border border-[#e0d5c7] bg-[#fffdf7] p-5">
             <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Chapter Signals</div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="mt-4 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
               {chapterRenderPlan.map(({ chapter }, index) => {
                 const chapterId = chapter.id || `${webBook.id}-chapter-${index + 1}`;
                 const chapterFeedback = feedback?.chapterFeedback?.[chapterId];
                 const heading = buildChapterHeading(chapter, index);
 
                 return (
-                  <div key={chapterId} className="rounded-[18px] border border-[#e0d5c7] bg-white p-3">
+                  <div key={chapterId} className="min-w-0 rounded-[18px] border border-[#e0d5c7] bg-white p-3">
                     <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">{heading.sequence}</div>
                     <div className="mt-2 line-clamp-2 text-sm font-semibold leading-5 text-[#1d1710]">{heading.displayTitle}</div>
-                    <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="mt-3 grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(88px,1fr))]">
                       <button
                         type="button"
                         onClick={() => onUpdateChapterFeedback(webBook.id, chapterId, {
                           signal: chapterFeedback?.signal === 'positive' ? null : 'positive',
                         })}
-                        className={`inline-flex min-w-0 w-full items-center justify-center gap-1.5 rounded-full border px-2 py-2 text-[9px] font-semibold uppercase tracking-[0.16em] transition ${
+                        className={`inline-flex min-w-0 w-full items-center justify-center gap-1 rounded-full border px-2 py-2 text-[8px] font-semibold uppercase leading-tight tracking-[0.12em] transition sm:text-[9px] sm:gap-1.5 sm:tracking-[0.16em] ${
                           chapterFeedback?.signal === 'positive'
                             ? 'border-[#245c39] bg-[#e8f6ea] text-[#1f4f31]'
                             : 'border-[#d8ccbd] bg-[#fffaf7] text-[#6b5b4a] hover:border-[#245c39] hover:text-[#1f4f31]'
@@ -287,7 +287,7 @@ export function WebBookViewer({
                         onClick={() => onUpdateChapterFeedback(webBook.id, chapterId, {
                           signal: chapterFeedback?.signal === 'negative' ? null : 'negative',
                         })}
-                        className={`inline-flex min-w-0 w-full items-center justify-center gap-1.5 rounded-full border px-2 py-2 text-[9px] font-semibold uppercase tracking-[0.16em] transition ${
+                        className={`inline-flex min-w-0 w-full items-center justify-center gap-1 rounded-full border px-2 py-2 text-[8px] font-semibold uppercase leading-tight tracking-[0.12em] transition sm:text-[9px] sm:gap-1.5 sm:tracking-[0.16em] ${
                           chapterFeedback?.signal === 'negative'
                             ? 'border-[#8c2f2f] bg-[#fdecec] text-[#7a2727]'
                             : 'border-[#d8ccbd] bg-[#fffaf7] text-[#6b5b4a] hover:border-[#8c2f2f] hover:text-[#7a2727]'

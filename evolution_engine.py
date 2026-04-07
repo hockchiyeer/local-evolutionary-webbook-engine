@@ -48,7 +48,6 @@ from engine.search import (
     fetch_manual_sources as fetch_manual_sources_impl,
     interleave_result_lists as interleave_result_lists_impl,
     normalize_http_url as normalize_http_url_impl,
-    run_provider_searches,
     search_bing as search_bing_impl,
     search_crossref as search_crossref_impl,
     search_duckduckgo as search_duckduckgo_impl,
@@ -131,6 +130,15 @@ USER_AGENTS = [
 SEARCH_REQUEST_TIMEOUT = 20
 PAGE_FETCH_TIMEOUT = 12
 CROSSREF_CONTACT_EMAIL = os.environ.get("WEBBOOK_CONTACT_EMAIL", "").strip()
+MIN_PROVIDER_RESULT_TARGET = 5
+PROVIDER_RESULT_TARGETS = {
+    "wikipedia": 8,
+    "openlibrary": 8,
+    "crossref": 8,
+    "duckduckgo": 10,
+    "google": 10,
+    "bing": 10,
+}
 
 # Characters that survive HTML decoding but produce garbled output in plain text.
 # Keyed by Unicode codepoint, mapped to their safe ASCII replacement.
@@ -787,7 +795,7 @@ def fetch_page_excerpt(url, headers, max_chars=1800):
     )
 
 
-def search_wikipedia(query, headers, limit=5):
+def search_wikipedia(query, headers, limit=PROVIDER_RESULT_TARGETS["wikipedia"]):
     return search_wikipedia_impl(
         query,
         headers,
@@ -799,7 +807,7 @@ def search_wikipedia(query, headers, limit=5):
     )
 
 
-def search_openlibrary(query, headers, limit=5):
+def search_openlibrary(query, headers, limit=PROVIDER_RESULT_TARGETS["openlibrary"]):
     return search_openlibrary_impl(
         query,
         headers,
@@ -810,7 +818,7 @@ def search_openlibrary(query, headers, limit=5):
     )
 
 
-def search_crossref(query, headers, limit=5):
+def search_crossref(query, headers, limit=PROVIDER_RESULT_TARGETS["crossref"]):
     return search_crossref_impl(
         query,
         headers,
@@ -822,7 +830,7 @@ def search_crossref(query, headers, limit=5):
     )
 
 
-def search_duckduckgo(query, headers, limit=5):
+def search_duckduckgo(query, headers, limit=PROVIDER_RESULT_TARGETS["duckduckgo"]):
     return search_duckduckgo_impl(
         query,
         headers,
@@ -833,7 +841,7 @@ def search_duckduckgo(query, headers, limit=5):
     )
 
 
-def search_bing(query, headers, limit=5):
+def search_bing(query, headers, limit=PROVIDER_RESULT_TARGETS["bing"]):
     return search_bing_impl(
         query,
         headers,
@@ -844,7 +852,7 @@ def search_bing(query, headers, limit=5):
     )
 
 
-def search_google(query, headers, limit=5):
+def search_google(query, headers, limit=PROVIDER_RESULT_TARGETS["google"]):
     return search_google_impl(
         query,
         headers,
@@ -888,24 +896,84 @@ def results_miss_query_focus(query, results, q_words):
     )
 
 
+def build_provider_depth_query(query):
+    normalized_query = normalize_space(query)
+    if not normalized_query:
+        return normalized_query
+
+    fallback_query = get_fallback_query(normalized_query)
+    if fallback_query and fallback_query != normalized_query:
+        return fallback_query
+
+    if len(normalized_query.split()) <= 4:
+        return f"{normalized_query} overview background analysis"
+
+    return normalized_query
+
+
+def merge_provider_result_sets(primary_results, supplemental_results, limit):
+    merged = []
+    seen = set()
+
+    for result in list(primary_results) + list(supplemental_results):
+        normalized_url = normalize_http_url(result.get("url", ""))
+        normalized_title = normalize_space(result.get("title", "")).lower()
+        normalized_content = normalize_space(result.get("content", "")).lower()[:180]
+        key = normalized_url or f"{normalized_title}::{normalized_content}"
+        if not key or key in seen:
+            continue
+
+        seen.add(key)
+        merged.append(result)
+
+        if len(merged) >= limit:
+            break
+
+    return merged
+
+
 def search_web(query, source_config=None):
     def perform_search(current_query, source_selection):
         headers = build_search_headers(
             choose_user_agent=lambda: random.choice(USER_AGENTS),
         )
         time.sleep(random.uniform(0.5, 1.5))
-        return run_provider_searches(
-            current_query,
-            source_selection,
-            headers=headers,
-            search_wikipedia_fn=search_wikipedia,
-            search_openlibrary_fn=search_openlibrary,
-            search_crossref_fn=search_crossref,
-            search_duckduckgo_fn=search_duckduckgo,
-            search_google_fn=search_google,
-            search_bing_fn=search_bing,
-            debug=lambda message: print(f"DEBUG: {message}", file=sys.stderr),
-        )
+        provider_results = []
+        supplemental_query = build_provider_depth_query(current_query)
+
+        for provider_name, provider_label, search_fn in (
+            ("wikipedia", "Wikipedia", search_wikipedia),
+            ("openlibrary", "Open Library", search_openlibrary),
+            ("crossref", "Crossref", search_crossref),
+            ("duckduckgo", "DuckDuckGo", search_duckduckgo),
+            ("google", "Google", search_google),
+            ("bing", "Bing", search_bing),
+        ):
+            if not source_selection.get(provider_name):
+                provider_results.append([])
+                continue
+
+            provider_limit = PROVIDER_RESULT_TARGETS.get(provider_name, MIN_PROVIDER_RESULT_TARGET)
+
+            try:
+                results = search_fn(current_query, headers, provider_limit)
+                if len(results) < MIN_PROVIDER_RESULT_TARGET and supplemental_query and supplemental_query != current_query:
+                    supplemental_results = search_fn(supplemental_query, headers, provider_limit)
+                    merged_results = merge_provider_result_sets(results, supplemental_results, provider_limit)
+                    if len(merged_results) > len(results):
+                        print(
+                            f"DEBUG: {provider_label} supplemental query added {len(merged_results) - len(results)} results",
+                            file=sys.stderr,
+                        )
+                    results = merged_results
+
+                print(f"DEBUG: {provider_label} returned {len(results)} results", file=sys.stderr)
+                provider_results.append(results)
+            except Exception as error:
+                print(f"DEBUG: {provider_label} failed: {error}", file=sys.stderr)
+                provider_results.append([])
+
+        return provider_results
 
     return search_web_results(
         query,

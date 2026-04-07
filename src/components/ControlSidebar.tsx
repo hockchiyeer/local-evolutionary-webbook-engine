@@ -14,6 +14,7 @@ interface ControlSidebarProps {
   error: string | null;
   notice: string | null;
   artifacts: ArtifactsState;
+  runtimeMs: number | null;
   showArtifacts: boolean;
   onToggleArtifacts: () => void;
   onSearch: () => Promise<void>;
@@ -94,6 +95,7 @@ export function ControlSidebar({
   error,
   notice,
   artifacts,
+  runtimeMs,
   showArtifacts,
   onToggleArtifacts,
   onSearch,
@@ -110,7 +112,6 @@ export function ControlSidebar({
   const artifactsRef = useRef<HTMLElement>(null);
   const isBusy = state.status !== 'idle' && state.status !== 'complete';
   const totalEnabledSourceCount = Object.values(sourceConfig.sources).filter(Boolean).length + sourceConfig.manualUrls.length;
-  const runtimeMs = artifacts.startedAt ? (artifacts.updatedAt ?? Date.now()) - artifacts.startedAt : null;
   const frontierCount = artifacts.searchResults.length;
   const evolvedCount = artifacts.evolvedPopulation.length;
   const chapterCount = artifacts.assembledBook?.chapters.length ?? 0;
