@@ -22,14 +22,30 @@ type PersistedFeedbackRecord = {
   updatedAt: number;
 };
 
+type PersistedFeedbackEvent = {
+  id: string;
+  recordId: string;
+  topic: string;
+  topicArea?: string;
+  bookTimestamp: number;
+  chapters: PersistedFeedbackChapter[];
+  feedback: WebBookFeedback;
+  capturedAt: number;
+  source: "upsert" | "bootstrap" | "migration";
+};
+
 type PersistedLearningStore = {
-  version: 1;
+  version: number;
   records: Record<string, PersistedFeedbackRecord>;
+  feedbackEvents: PersistedFeedbackEvent[];
   rewardProfile: RewardProfile;
   updatedAt: number | null;
 };
 
+const CURRENT_LEARNING_STORE_VERSION = 2;
 const LEARNING_STORE_PATH = path.join(process.cwd(), "data", "feedback-learning.json");
+const LEARNING_BACKUP_DIR = path.join(process.cwd(), "data", "backups");
+const MAX_LEARNING_BACKUPS = 20;
 
 const DEFAULT_REWARD_WEIGHTS: RewardWeightProfile = {
   relevance: 1,
@@ -217,8 +233,9 @@ const normalizeRewardProfile = (value: unknown): RewardProfile => {
 };
 
 const createEmptyLearningStore = (): PersistedLearningStore => ({
-  version: 1,
+  version: CURRENT_LEARNING_STORE_VERSION,
   records: {},
+  feedbackEvents: [],
   rewardProfile: createEmptyRewardProfile(),
   updatedAt: null,
 });
@@ -288,6 +305,54 @@ const normalizePersistedFeedbackRecord = (value: unknown): PersistedFeedbackReco
     chapters,
     feedback,
     updatedAt,
+  };
+};
+
+const normalizePersistedFeedbackEvent = (value: unknown): PersistedFeedbackEvent | null => {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const recordId = String(candidate.recordId || candidate.id || "").trim();
+  if (!recordId) {
+    return null;
+  }
+
+  const chapters = Array.isArray(candidate.chapters)
+    ? candidate.chapters
+        .map((chapter, index) => ({
+          id: String((chapter as Record<string, unknown>)?.id || `${recordId}-chapter-${index + 1}`),
+          title: String((chapter as Record<string, unknown>)?.title || `Chapter ${index + 1}`),
+        }))
+    : [];
+  const rawFeedback = candidate.feedback && typeof candidate.feedback === "object"
+    ? candidate.feedback as Partial<WebBookFeedback> & { chapterFeedback?: Record<string, unknown> }
+    : {};
+  const rawChapterFeedback = rawFeedback.chapterFeedback && typeof rawFeedback.chapterFeedback === "object"
+    ? rawFeedback.chapterFeedback
+    : {};
+  const chapterFeedbackEntries = Object.fromEntries(
+    Object.entries(rawChapterFeedback).map(([key, entry]) => [key, normalizeChapterFeedback(entry)]),
+  );
+  const feedback: WebBookFeedback = {
+    bookSignal: normalizeFeedbackSignal(rawFeedback.bookSignal),
+    issueTags: normalizeIssueTags(rawFeedback.issueTags),
+    customTags: normalizeCustomTags(rawFeedback.customTags),
+    chapterFeedback: chapterFeedbackEntries,
+    updatedAt: typeof rawFeedback.updatedAt === "number" ? rawFeedback.updatedAt : null,
+  };
+
+  return {
+    id: String(candidate.id || `feedback-event-${recordId}-${candidate.capturedAt || Date.now()}`),
+    recordId,
+    topic: String(candidate.topic || ""),
+    topicArea: typeof candidate.topicArea === "string" ? candidate.topicArea : undefined,
+    bookTimestamp: Number(candidate.bookTimestamp || candidate.timestamp || Date.now()),
+    chapters,
+    feedback,
+    capturedAt: Number(candidate.capturedAt || Date.now()),
+    source: candidate.source === "bootstrap" || candidate.source === "migration" ? candidate.source : "upsert",
   };
 };
 
@@ -405,8 +470,83 @@ const buildRewardProfileFromPersistedRecords = (records: PersistedFeedbackRecord
   };
 };
 
+const buildFeedbackEventFromRecord = (
+  record: PersistedFeedbackRecord,
+  source: PersistedFeedbackEvent["source"] = "upsert",
+): PersistedFeedbackEvent => ({
+  id: `feedback-event-${record.id}-${record.updatedAt}`,
+  recordId: record.id,
+  topic: record.topic,
+  topicArea: record.topicArea,
+  bookTimestamp: record.timestamp,
+  chapters: record.chapters,
+  feedback: record.feedback,
+  capturedAt: record.updatedAt,
+  source,
+});
+
+const mergeChapters = (
+  existingChapters: PersistedFeedbackChapter[],
+  incomingChapters: PersistedFeedbackChapter[],
+) => {
+  const chapterMap = new Map<string, PersistedFeedbackChapter>();
+
+  incomingChapters.forEach((chapter) => {
+    chapterMap.set(chapter.id, chapter);
+  });
+  existingChapters.forEach((chapter) => {
+    if (!chapterMap.has(chapter.id)) {
+      chapterMap.set(chapter.id, chapter);
+    }
+  });
+
+  return Array.from(chapterMap.values());
+};
+
+const mergeFeedbackRecords = (
+  existingRecord: PersistedFeedbackRecord | undefined,
+  incomingRecord: PersistedFeedbackRecord,
+): PersistedFeedbackRecord => {
+  if (!existingRecord) {
+    return incomingRecord;
+  }
+
+  return {
+    ...existingRecord,
+    ...incomingRecord,
+    chapters: mergeChapters(existingRecord.chapters, incomingRecord.chapters),
+    feedback: {
+      ...existingRecord.feedback,
+      ...incomingRecord.feedback,
+      chapterFeedback: {
+        ...existingRecord.feedback.chapterFeedback,
+        ...incomingRecord.feedback.chapterFeedback,
+      },
+      updatedAt: Math.max(existingRecord.feedback.updatedAt || 0, incomingRecord.feedback.updatedAt || 0),
+    },
+    updatedAt: Math.max(existingRecord.updatedAt || 0, incomingRecord.updatedAt || 0),
+  };
+};
+
+const shouldAppendFeedbackEvent = (
+  existingRecord: PersistedFeedbackRecord | undefined,
+  mergedRecord: PersistedFeedbackRecord,
+) => {
+  if (!existingRecord) {
+    return true;
+  }
+
+  const before = JSON.stringify(existingRecord.feedback);
+  const after = JSON.stringify(mergedRecord.feedback);
+  return before !== after;
+};
+
 const ensureLearningStoreDirectory = () => {
   fs.mkdirSync(path.dirname(LEARNING_STORE_PATH), { recursive: true });
+};
+
+const ensureLearningBackupDirectory = () => {
+  fs.mkdirSync(LEARNING_BACKUP_DIR, { recursive: true });
 };
 
 const readLearningStore = (): PersistedLearningStore => {
@@ -420,17 +560,28 @@ const readLearningStore = (): PersistedLearningStore => {
       return createEmptyLearningStore();
     }
 
-    const parsed = JSON.parse(raw) as Partial<PersistedLearningStore> & { records?: Record<string, unknown> };
+    const parsed = JSON.parse(raw) as Partial<PersistedLearningStore> & {
+      records?: Record<string, unknown>;
+      feedbackEvents?: unknown[];
+    };
     const rawRecords = parsed.records && typeof parsed.records === "object" ? parsed.records : {};
     const records = Object.fromEntries(
       Object.entries(rawRecords)
         .map(([key, value]) => [key, normalizePersistedFeedbackRecord(value)])
         .filter((entry): entry is [string, PersistedFeedbackRecord] => Boolean(entry[1])),
     );
+    const rawFeedbackEvents = Array.isArray(parsed.feedbackEvents) ? parsed.feedbackEvents : [];
+    const feedbackEvents = rawFeedbackEvents
+      .map((event) => normalizePersistedFeedbackEvent(event))
+      .filter((event): event is PersistedFeedbackEvent => Boolean(event));
+    const seededMigrationEvents = feedbackEvents.length > 0
+      ? feedbackEvents
+      : Object.values(records).map((record) => buildFeedbackEventFromRecord(record, "migration"));
 
     return {
-      version: 1,
+      version: typeof parsed.version === "number" ? parsed.version : 1,
       records,
+      feedbackEvents: seededMigrationEvents,
       rewardProfile: buildRewardProfileFromPersistedRecords(Object.values(records)),
       updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : null,
     };
@@ -443,13 +594,38 @@ const readLearningStore = (): PersistedLearningStore => {
 const writeLearningStore = (store: PersistedLearningStore) => {
   ensureLearningStoreDirectory();
   const payload: PersistedLearningStore = {
-    version: 1,
+    version: CURRENT_LEARNING_STORE_VERSION,
     records: store.records,
+    feedbackEvents: store.feedbackEvents,
     rewardProfile: normalizeRewardProfile(store.rewardProfile),
     updatedAt: store.updatedAt,
   };
+  const serializedPayload = JSON.stringify(payload, null, 2);
+  const currentSerializedPayload = fs.existsSync(LEARNING_STORE_PATH)
+    ? fs.readFileSync(LEARNING_STORE_PATH, "utf8")
+    : "";
+
+  if (currentSerializedPayload === serializedPayload) {
+    return;
+  }
+
+  if (currentSerializedPayload.trim()) {
+    ensureLearningBackupDirectory();
+    const backupTimestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const backupPath = path.join(LEARNING_BACKUP_DIR, `feedback-learning-${backupTimestamp}.json`);
+    fs.writeFileSync(backupPath, currentSerializedPayload, "utf8");
+
+    const backupFiles = fs.readdirSync(LEARNING_BACKUP_DIR)
+      .filter((file) => file.startsWith("feedback-learning-") && file.endsWith(".json"))
+      .sort()
+      .reverse();
+    backupFiles.slice(MAX_LEARNING_BACKUPS).forEach((file) => {
+      fs.unlinkSync(path.join(LEARNING_BACKUP_DIR, file));
+    });
+  }
+
   const tempPath = `${LEARNING_STORE_PATH}.tmp`;
-  fs.writeFileSync(tempPath, JSON.stringify(payload, null, 2), "utf8");
+  fs.writeFileSync(tempPath, serializedPayload, "utf8");
   fs.renameSync(tempPath, LEARNING_STORE_PATH);
 };
 
@@ -464,6 +640,7 @@ const resolveEffectiveRewardProfile = (candidate: unknown): RewardProfile => {
 
 const upsertLearningRecords = (entries: unknown[]) => {
   const store = readLearningStore();
+  const source = entries.length > 1 ? "bootstrap" : "upsert";
 
   entries.forEach((entry) => {
     const normalized = normalizePersistedFeedbackRecord(entry);
@@ -471,7 +648,13 @@ const upsertLearningRecords = (entries: unknown[]) => {
       return;
     }
 
-    store.records[normalized.id] = normalized;
+    const existingRecord = store.records[normalized.id];
+    const mergedRecord = mergeFeedbackRecords(existingRecord, normalized);
+    store.records[normalized.id] = mergedRecord;
+
+    if (shouldAppendFeedbackEvent(existingRecord, mergedRecord)) {
+      store.feedbackEvents.push(buildFeedbackEventFromRecord(mergedRecord, source));
+    }
   });
 
   store.rewardProfile = buildRewardProfileFromPersistedRecords(Object.values(store.records));
@@ -481,6 +664,7 @@ const upsertLearningRecords = (entries: unknown[]) => {
   return {
     rewardProfile: store.rewardProfile,
     recordCount: Object.keys(store.records).length,
+    feedbackEventCount: store.feedbackEvents.length,
     updatedAt: store.updatedAt,
   };
 };
@@ -490,6 +674,10 @@ async function startServer() {
   const PORT = 3000;
   const SEARCH_REQUEST_TIMEOUT_MS = 420000;
   const EXTENDED_REQUEST_TIMEOUT_MS = 480000;
+
+  // Normalize and migrate the learning store on startup so older schemas are
+  // rewritten into the current durable format before any new feedback arrives.
+  writeLearningStore(readLearningStore());
 
   app.use(cors());
   app.use(express.json({ limit: "10mb" }));
