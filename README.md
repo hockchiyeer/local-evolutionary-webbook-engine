@@ -75,6 +75,7 @@ User feedback on whole books, chapter quality, and custom tags is now persisted 
 - the server automatically migrates the older JSON learning store on startup when present
 - stored feedback is shared across sessions and machines that use the same backend instance
 - the persisted reward profile is fed back into later `evolve` and `assemble` runs to strengthen the local learning loop
+- `npm run clean` preserves the persisted learning store files under `data/`
 
 ## UI Mapping
 
@@ -192,7 +193,9 @@ Useful commands:
 
 ```bash
 npm run build
+npm run clean
 npm run lint
+npm run test:clean
 python -m unittest discover
 ```
 
