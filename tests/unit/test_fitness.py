@@ -120,6 +120,28 @@ class FitnessTests(unittest.TestCase):
             set(breakdown.keys()),
         )
 
+    def test_feedback_reward_profile_increases_margin_for_high_evidence_selection(self):
+        population = build_population()
+        reward_profile = {
+            "sampleSize": 4,
+            "dominantIssues": ["weak_evidence", "repetitive"],
+            "weights": {
+                "authority": 1.35,
+                "evidenceDensity": 1.35,
+                "antiRedundancy": 1.18,
+            },
+        }
+
+        baseline_margin = calculate_fitness([0, 1], population, QUERY) - calculate_fitness([2, 3], population, QUERY)
+        adapted_margin = calculate_fitness([0, 1], population, QUERY, reward_profile=reward_profile) - calculate_fitness(
+            [2, 3],
+            population,
+            QUERY,
+            reward_profile=reward_profile,
+        )
+
+        self.assertGreater(adapted_margin, baseline_margin)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, MutableMapping, Sequence, Set
 
 from .archetypes import infer_query_archetype
 from .nlp import semantic_similarity
+from .reinforcement import reward_weight
 
 
 _METADATA_PREFIX_PATTERN = re.compile(
@@ -344,18 +345,24 @@ def score_sentence(
     novelty_penalty: float,
     *,
     words: Set[str] | None = None,
+    reward_profile: Dict[str, Any] | None = None,
 ) -> float:
     token_set = words or set()
     q_overlap = len(token_set.intersection(q_words)) / max(len(q_words), 1)
     theme_overlap = len(token_set.intersection(theme_words)) / max(len(theme_words), 1)
     detail_bonus = min(len(token_set) / 20, 1.0)
     signal_penalty = _sentence_signal_penalty(sentence, token_set)
+    relevance_weight = reward_weight(reward_profile, "relevance")
+    evidence_weight = reward_weight(reward_profile, "evidenceDensity")
+    structure_weight = reward_weight(reward_profile, "structure")
+    coherence_weight = reward_weight(reward_profile, "coherence")
+    redundancy_weight = reward_weight(reward_profile, "antiRedundancy")
 
     return (
-        (q_overlap * 1.7)
-        + (theme_overlap * 1.3)
-        + (detail_bonus * 0.4)
-        + source_quality
-        - novelty_penalty
+        (q_overlap * 1.7 * relevance_weight)
+        + (theme_overlap * 1.3 * coherence_weight)
+        + (detail_bonus * 0.4 * structure_weight)
+        + (source_quality * evidence_weight)
+        - (novelty_penalty * redundancy_weight)
         - signal_penalty
     )

@@ -48,7 +48,6 @@ from engine.search import (
     fetch_manual_sources as fetch_manual_sources_impl,
     interleave_result_lists as interleave_result_lists_impl,
     normalize_http_url as normalize_http_url_impl,
-    run_provider_searches,
     search_bing as search_bing_impl,
     search_crossref as search_crossref_impl,
     search_duckduckgo as search_duckduckgo_impl,
@@ -58,6 +57,7 @@ from engine.search import (
     search_web_results,
 )
 from engine.titles import build_chapter_title
+from engine.reinforcement import normalize_reward_profile
 
 POISON_KEYWORDS = [
     "copyright",
@@ -130,6 +130,15 @@ USER_AGENTS = [
 SEARCH_REQUEST_TIMEOUT = 20
 PAGE_FETCH_TIMEOUT = 12
 CROSSREF_CONTACT_EMAIL = os.environ.get("WEBBOOK_CONTACT_EMAIL", "").strip()
+MIN_PROVIDER_RESULT_TARGET = 5
+PROVIDER_RESULT_TARGETS = {
+    "wikipedia": 8,
+    "openlibrary": 8,
+    "crossref": 8,
+    "duckduckgo": 10,
+    "google": 10,
+    "bing": 10,
+}
 
 # Characters that survive HTML decoding but produce garbled output in plain text.
 # Keyed by Unicode codepoint, mapped to their safe ASCII replacement.
@@ -786,7 +795,7 @@ def fetch_page_excerpt(url, headers, max_chars=1800):
     )
 
 
-def search_wikipedia(query, headers, limit=5):
+def search_wikipedia(query, headers, limit=PROVIDER_RESULT_TARGETS["wikipedia"]):
     return search_wikipedia_impl(
         query,
         headers,
@@ -798,7 +807,7 @@ def search_wikipedia(query, headers, limit=5):
     )
 
 
-def search_openlibrary(query, headers, limit=5):
+def search_openlibrary(query, headers, limit=PROVIDER_RESULT_TARGETS["openlibrary"]):
     return search_openlibrary_impl(
         query,
         headers,
@@ -809,7 +818,7 @@ def search_openlibrary(query, headers, limit=5):
     )
 
 
-def search_crossref(query, headers, limit=5):
+def search_crossref(query, headers, limit=PROVIDER_RESULT_TARGETS["crossref"]):
     return search_crossref_impl(
         query,
         headers,
@@ -821,7 +830,7 @@ def search_crossref(query, headers, limit=5):
     )
 
 
-def search_duckduckgo(query, headers, limit=5):
+def search_duckduckgo(query, headers, limit=PROVIDER_RESULT_TARGETS["duckduckgo"]):
     return search_duckduckgo_impl(
         query,
         headers,
@@ -832,7 +841,7 @@ def search_duckduckgo(query, headers, limit=5):
     )
 
 
-def search_bing(query, headers, limit=5):
+def search_bing(query, headers, limit=PROVIDER_RESULT_TARGETS["bing"]):
     return search_bing_impl(
         query,
         headers,
@@ -843,7 +852,7 @@ def search_bing(query, headers, limit=5):
     )
 
 
-def search_google(query, headers, limit=5):
+def search_google(query, headers, limit=PROVIDER_RESULT_TARGETS["google"]):
     return search_google_impl(
         query,
         headers,
@@ -887,24 +896,84 @@ def results_miss_query_focus(query, results, q_words):
     )
 
 
+def build_provider_depth_query(query):
+    normalized_query = normalize_space(query)
+    if not normalized_query:
+        return normalized_query
+
+    fallback_query = get_fallback_query(normalized_query)
+    if fallback_query and fallback_query != normalized_query:
+        return fallback_query
+
+    if len(normalized_query.split()) <= 4:
+        return f"{normalized_query} overview background analysis"
+
+    return normalized_query
+
+
+def merge_provider_result_sets(primary_results, supplemental_results, limit):
+    merged = []
+    seen = set()
+
+    for result in list(primary_results) + list(supplemental_results):
+        normalized_url = normalize_http_url(result.get("url", ""))
+        normalized_title = normalize_space(result.get("title", "")).lower()
+        normalized_content = normalize_space(result.get("content", "")).lower()[:180]
+        key = normalized_url or f"{normalized_title}::{normalized_content}"
+        if not key or key in seen:
+            continue
+
+        seen.add(key)
+        merged.append(result)
+
+        if len(merged) >= limit:
+            break
+
+    return merged
+
+
 def search_web(query, source_config=None):
     def perform_search(current_query, source_selection):
         headers = build_search_headers(
             choose_user_agent=lambda: random.choice(USER_AGENTS),
         )
         time.sleep(random.uniform(0.5, 1.5))
-        return run_provider_searches(
-            current_query,
-            source_selection,
-            headers=headers,
-            search_wikipedia_fn=search_wikipedia,
-            search_openlibrary_fn=search_openlibrary,
-            search_crossref_fn=search_crossref,
-            search_duckduckgo_fn=search_duckduckgo,
-            search_google_fn=search_google,
-            search_bing_fn=search_bing,
-            debug=lambda message: print(f"DEBUG: {message}", file=sys.stderr),
-        )
+        provider_results = []
+        supplemental_query = build_provider_depth_query(current_query)
+
+        for provider_name, provider_label, search_fn in (
+            ("wikipedia", "Wikipedia", search_wikipedia),
+            ("openlibrary", "Open Library", search_openlibrary),
+            ("crossref", "Crossref", search_crossref),
+            ("duckduckgo", "DuckDuckGo", search_duckduckgo),
+            ("google", "Google", search_google),
+            ("bing", "Bing", search_bing),
+        ):
+            if not source_selection.get(provider_name):
+                provider_results.append([])
+                continue
+
+            provider_limit = PROVIDER_RESULT_TARGETS.get(provider_name, MIN_PROVIDER_RESULT_TARGET)
+
+            try:
+                results = search_fn(current_query, headers, provider_limit)
+                if len(results) < MIN_PROVIDER_RESULT_TARGET and supplemental_query and supplemental_query != current_query:
+                    supplemental_results = search_fn(supplemental_query, headers, provider_limit)
+                    merged_results = merge_provider_result_sets(results, supplemental_results, provider_limit)
+                    if len(merged_results) > len(results):
+                        print(
+                            f"DEBUG: {provider_label} supplemental query added {len(merged_results) - len(results)} results",
+                            file=sys.stderr,
+                        )
+                    results = merged_results
+
+                print(f"DEBUG: {provider_label} returned {len(results)} results", file=sys.stderr)
+                provider_results.append(results)
+            except Exception as error:
+                print(f"DEBUG: {provider_label} failed: {error}", file=sys.stderr)
+                provider_results.append([])
+
+        return provider_results
 
     return search_web_results(
         query,
@@ -951,7 +1020,7 @@ def get_mock_results(query):
         build_subtopic_candidates=build_subtopic_candidates,
     )
 
-def calculate_fitness(individual, all_results, query):
+def calculate_fitness(individual, all_results, query, reward_profile=None):
     q_words = query_words(query)
     focus_words = expand_query_focus_words(q_words)
     if any("_semantic_coherence" not in result for result in all_results):
@@ -980,11 +1049,12 @@ def calculate_fitness(individual, all_results, query):
         content_signature_tokens=content_signature_tokens,
         jaccard_similarity=jaccard_similarity,
         average=average,
+        reward_profile=reward_profile,
     )
     return score
 
 
-def calculate_fitness_breakdown(individual, all_results, query):
+def calculate_fitness_breakdown(individual, all_results, query, reward_profile=None):
     q_words = query_words(query)
     focus_words = expand_query_focus_words(q_words)
     if any("_semantic_coherence" not in result for result in all_results):
@@ -1013,6 +1083,7 @@ def calculate_fitness_breakdown(individual, all_results, query):
         content_signature_tokens=content_signature_tokens,
         jaccard_similarity=jaccard_similarity,
         average=average,
+        reward_profile=reward_profile,
     )
     return breakdown
 
@@ -1041,8 +1112,9 @@ def mutate(individual, ranked_indices, target_size, pool_size, rng):
 def tournament_pick(scored_population, rng, size=4):
     return ga_tournament_pick(scored_population, rng, size=size)
 
-def evolve(all_results, query, generations=10, pop_size=30):
+def evolve(all_results, query, generations=10, pop_size=30, reward_profile=None):
     normalized_results = dedupe_results(all_results, query)
+    normalized_reward_profile = normalize_reward_profile(reward_profile)
     if not normalized_results:
         return []
 
@@ -1060,7 +1132,7 @@ def evolve(all_results, query, generations=10, pop_size=30):
     def get_fitness(individual):
         key = tuple(sorted(individual))
         if key not in fitness_cache:
-            fitness_cache[key] = calculate_fitness(individual, normalized_results, query)
+            fitness_cache[key] = calculate_fitness(individual, normalized_results, query, reward_profile=normalized_reward_profile)
         return fitness_cache[key]
 
     attach_selection_features(
@@ -1172,7 +1244,7 @@ def choose_items_for_chapter(items, keyword_set, used_keys, key_name, text_gette
 # Deprecated build_fallback_paragraph logic has been eliminated
 
 
-def score_sentence(sentence, q_words, theme_words, source_quality, novelty_penalty, words=None):
+def score_sentence(sentence, q_words, theme_words, source_quality, novelty_penalty, words=None, reward_profile=None):
     return score_sentence_impl(
         sentence,
         q_words,
@@ -1180,10 +1252,12 @@ def score_sentence(sentence, q_words, theme_words, source_quality, novelty_penal
         source_quality,
         novelty_penalty,
         words=words,
+        reward_profile=reward_profile,
     )
 
-def generate_webbook(selected_sources, query):
+def generate_webbook(selected_sources, query, reward_profile=None):
     normalized_sources = dedupe_results(selected_sources, query)
+    normalized_reward_profile = normalize_reward_profile(reward_profile)
     empty_archetype = infer_query_archetype(
         query,
         (),
@@ -1330,6 +1404,7 @@ def generate_webbook(selected_sources, query):
             semantic_title_focus=semantic_title_focus,
             chapter_index=chapter_index,
             chapter_count=len(chapter_templates),
+            reward_profile=normalized_reward_profile,
             tokenize=tokenize,
             stop_words=STOP_WORDS,
             normalize_term_key=normalize_term_key,
@@ -1368,7 +1443,8 @@ def generate_webbook(selected_sources, query):
                 keyword_set,
                 entry["source_quality"],
                 novelty_penalty,
-                words=entry.get("words")
+                words=entry.get("words"),
+                reward_profile=normalized_reward_profile,
             )
             score -= entry.get("cluster_priority", 0) * 0.12
             scored_sentences.append((score, entry))
@@ -1403,7 +1479,20 @@ def generate_webbook(selected_sources, query):
                 quality_score = sum(s["source_quality"] for s in chrom_sentences) / len(chrom_sentences)
                 used_sources = len(set(s["source_index"] for s in chrom_sentences))
                 diversity_score = used_sources / len(chrom_sentences)
-                return (overlap_score * 0.4) + (quality_score * 0.3) + (diversity_score * 0.2) + (density_score * 0.1)
+                reward_weights = normalized_reward_profile["weights"]
+                weighted_total = (
+                    (overlap_score * 0.4 * reward_weights["relevance"])
+                    + (quality_score * 0.3 * reward_weights["evidenceDensity"])
+                    + (diversity_score * 0.2 * reward_weights["diversity"])
+                    + (density_score * 0.1 * reward_weights["structure"])
+                )
+                weight_normalizer = (
+                    (0.4 * reward_weights["relevance"])
+                    + (0.3 * reward_weights["evidenceDensity"])
+                    + (0.2 * reward_weights["diversity"])
+                    + (0.1 * reward_weights["structure"])
+                ) or 1.0
+                return weighted_total / weight_normalizer
 
             population_micro = []
             for _ in range(pool_size_micro):
@@ -1478,6 +1567,7 @@ def generate_webbook(selected_sources, query):
             semantic_title_focus=semantic_title_focus,
             chapter_index=chapter_index,
             chapter_count=len(chapter_templates),
+            reward_profile=normalized_reward_profile,
             tokenize=tokenize,
             stop_words=STOP_WORDS,
             normalize_term_key=normalize_term_key,
@@ -1600,9 +1690,16 @@ def main():
                 print_json(strip_internal_keys(all_results))
             elif mode == "evolve":
                 try:
-                    payload = read_payload()
-                    all_results = json.loads(payload)
-                    evolved_sources = evolve(all_results, query)
+                    payload = json.loads(read_payload())
+                    if isinstance(payload, dict):
+                        all_results = payload.get("population", [])
+                        generations = int(payload.get("generations", 10) or 10)
+                        reward_profile = payload.get("rewardProfile")
+                    else:
+                        all_results = payload
+                        generations = 10
+                        reward_profile = None
+                    evolved_sources = evolve(all_results, query, generations=generations, reward_profile=reward_profile)
                     print_json(strip_internal_keys(evolved_sources))
                 except json.JSONDecodeError as e:
                     print_json({"error": f"Invalid JSON payload for evolution: {str(e)}"})
@@ -1610,9 +1707,14 @@ def main():
                     print_json({"error": f"Evolution failed: {str(e)}"})
             elif mode == "assemble":
                 try:
-                    payload = read_payload()
-                    evolved_sources = json.loads(payload)
-                    webbook = generate_webbook(evolved_sources, query)
+                    payload = json.loads(read_payload())
+                    if isinstance(payload, dict):
+                        evolved_sources = payload.get("population", [])
+                        reward_profile = payload.get("rewardProfile")
+                    else:
+                        evolved_sources = payload
+                        reward_profile = None
+                    webbook = generate_webbook(evolved_sources, query, reward_profile=reward_profile)
                     print_json(strip_internal_keys(webbook))
                 except json.JSONDecodeError as e:
                     print_json({"error": f"Invalid JSON payload for assembly: {str(e)}"})

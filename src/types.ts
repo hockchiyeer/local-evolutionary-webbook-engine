@@ -5,6 +5,16 @@
 
 export type SearchSourceKey = "wikipedia" | "openlibrary" | "crossref" | "duckduckgo" | "google" | "bing";
 export type SearchExecutionMode = "sequential" | "parallel";
+export type FeedbackSignal = "positive" | "negative";
+export type FeedbackIssueTag =
+  | "too_generic"
+  | "repetitive"
+  | "weak_evidence"
+  | "unclear_titles"
+  | "wrong_structure"
+  | "clear_structure"
+  | "strong_evidence"
+  | "insightful_synthesis";
 
 export interface SearchSourceConfig {
   sources: Record<SearchSourceKey, boolean>;
@@ -44,7 +54,7 @@ export interface WebPageGenotype {
 }
 
 export interface Chapter {
-  id: string;
+  id?: string;
   title: string;
   content: string;
   sources: SourceReference[];
@@ -56,12 +66,67 @@ export interface Chapter {
   archetype?: string;
 }
 
+export interface ChapterFeedback {
+  signal: FeedbackSignal | null;
+  issueTags: FeedbackIssueTag[];
+  customTags: string[];
+  updatedAt: number | null;
+}
+
+export interface WebBookFeedback {
+  bookSignal: FeedbackSignal | null;
+  issueTags: FeedbackIssueTag[];
+  customTags: string[];
+  chapterFeedback: Record<string, ChapterFeedback>;
+  updatedAt: number | null;
+}
+
+export interface RewardWeightProfile {
+  relevance: number;
+  coverage: number;
+  authority: number;
+  evidenceDensity: number;
+  diversity: number;
+  structure: number;
+  coherence: number;
+  titleSpecificity: number;
+  antiRedundancy: number;
+}
+
+export interface RewardProfile {
+  sampleSize: number;
+  positiveSignals: number;
+  negativeSignals: number;
+  dominantIssues: FeedbackIssueTag[];
+  dominantCustomTags: string[];
+  weights: RewardWeightProfile;
+  updatedAt: number | null;
+}
+
+export interface ProviderRunSummary {
+  provider: string;
+  status: "queued" | "running" | "complete" | "error";
+  resultCount: number;
+  frontierCount: number;
+  durationMs: number | null;
+  error: string | null;
+}
+
+export interface WebBookRunContext {
+  sourceConfig: SearchSourceConfig;
+  bestFitness: number;
+  providerStatuses: ProviderRunSummary[];
+  rewardProfileSnapshot: RewardProfile;
+}
+
 export interface WebBook {
   id: string;
   topic: string;
   chapters: Chapter[];
   timestamp: number;
   topicArea?: string;
+  feedback?: WebBookFeedback;
+  runContext?: WebBookRunContext;
 }
 
 export type EvolutionStatus = 'idle' | 'searching' | 'evolving' | 'assembling' | 'complete';

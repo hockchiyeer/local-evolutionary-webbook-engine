@@ -1,10 +1,13 @@
 import React from 'react';
-import { ArrowUpRight, BookOpen, CheckCircle2, Image as ImageIcon, Layers } from 'lucide-react';
-import type { Chapter, WebBook } from '../types';
+import { ArrowUpRight, BookOpen, CheckCircle2, Image as ImageIcon, Layers, Plus, Sparkles, ThumbsDown, ThumbsUp, X } from 'lucide-react';
+import type { Chapter, ChapterFeedback, FeedbackIssueTag, FeedbackSignal, RewardProfile, WebBook, WebBookFeedback } from '../types';
 import { buildChapterRenderPlan, getChapterSourceLinks, normalizeSourceLink } from '../utils/webBookRender';
 
 interface WebBookViewerProps {
   webBook: WebBook;
+  rewardProfile: RewardProfile;
+  onUpdateWebBookFeedback: (bookId: string, patch: Partial<Pick<WebBookFeedback, 'bookSignal' | 'issueTags' | 'customTags'>>) => void;
+  onUpdateChapterFeedback: (bookId: string, chapterId: string, patch: Partial<ChapterFeedback>) => void;
 }
 
 const TOPIC_AREA_LABELS: Record<string, string> = {
@@ -16,6 +19,31 @@ const TOPIC_AREA_LABELS: Record<string, string> = {
   place: 'Place study sequence',
   technology: 'Technology sequence',
 };
+
+const FEEDBACK_TAG_LABELS: Record<FeedbackIssueTag, string> = {
+  too_generic: 'Too Generic',
+  repetitive: 'Repetitive',
+  weak_evidence: 'Weak Evidence',
+  unclear_titles: 'Unclear Titles',
+  wrong_structure: 'Wrong Structure',
+  clear_structure: 'Clear Structure',
+  strong_evidence: 'Strong Evidence',
+  insightful_synthesis: 'Insightful Synthesis',
+};
+
+const BOOK_FEEDBACK_TAGS: FeedbackIssueTag[] = [
+  'too_generic',
+  'repetitive',
+  'weak_evidence',
+  'unclear_titles',
+  'wrong_structure',
+  'clear_structure',
+  'strong_evidence',
+  'insightful_synthesis',
+];
+
+const normalizeCustomFeedbackTag = (value: string) => value.trim().replace(/\s+/g, ' ').slice(0, 48);
+const customFeedbackTagKey = (value: string) => normalizeCustomFeedbackTag(value).toLowerCase();
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -37,16 +65,246 @@ const buildChapterHeading = (chapter: Chapter, index: number) => {
   };
 };
 
-export function WebBookViewer({ webBook }: WebBookViewerProps) {
+export function WebBookViewer({
+  webBook,
+  rewardProfile,
+  onUpdateWebBookFeedback,
+  onUpdateChapterFeedback,
+}: WebBookViewerProps) {
+  const [customTagInput, setCustomTagInput] = React.useState('');
   const chapterRenderPlan = buildChapterRenderPlan(webBook.chapters);
   const finalDocumentPageNumber = chapterRenderPlan.length > 0
     ? (chapterRenderPlan[chapterRenderPlan.length - 1].analysisPageNumber ?? chapterRenderPlan[chapterRenderPlan.length - 1].titlePageNumber) + 1
     : 3;
   const topicAreaKey = webBook.topicArea || chapterRenderPlan[0]?.chapter.archetype || 'generic';
   const topicAreaLabel = TOPIC_AREA_LABELS[topicAreaKey] || TOPIC_AREA_LABELS.generic;
+  const feedback = webBook.feedback;
+  const activeIssueTags = new Set(feedback?.issueTags || []);
+  const customTags = feedback?.customTags || [];
+  const dominantIssueSummary = rewardProfile.dominantIssues
+    .map((tag) => FEEDBACK_TAG_LABELS[tag])
+    .join(' | ');
+  const dominantCustomTagSummary = rewardProfile.dominantCustomTags.join(' | ');
+
+  const toggleBookSignal = (signal: FeedbackSignal) => {
+    onUpdateWebBookFeedback(webBook.id, {
+      bookSignal: feedback?.bookSignal === signal ? null : signal,
+    });
+  };
+
+  const toggleBookIssueTag = (tag: FeedbackIssueTag) => {
+    const nextIssueTags = activeIssueTags.has(tag)
+      ? (feedback?.issueTags || []).filter((currentTag) => currentTag !== tag)
+      : [...(feedback?.issueTags || []), tag];
+    onUpdateWebBookFeedback(webBook.id, {
+      issueTags: nextIssueTags,
+    });
+  };
+
+  const addCustomTag = () => {
+    const normalized = normalizeCustomFeedbackTag(customTagInput);
+    if (!normalized) {
+      return;
+    }
+
+    const currentTags = feedback?.customTags || [];
+    const nextTags = currentTags.some((tag) => customFeedbackTagKey(tag) === customFeedbackTagKey(normalized))
+      ? currentTags
+      : [...currentTags, normalized];
+
+    onUpdateWebBookFeedback(webBook.id, {
+      customTags: nextTags,
+    });
+    setCustomTagInput('');
+  };
+
+  const removeCustomTag = (tagToRemove: string) => {
+    onUpdateWebBookFeedback(webBook.id, {
+      customTags: (feedback?.customTags || []).filter((tag) => customFeedbackTagKey(tag) !== customFeedbackTagKey(tagToRemove)),
+    });
+  };
 
   return (
     <div className="web-book-container w-full max-w-[900px] space-y-8 overflow-x-hidden print:max-w-none print:space-y-0 print:block print:overflow-visible" id="top">
+      <section
+        data-html2canvas-ignore="true"
+        className="print:hidden rounded-[28px] border border-[#d7cbbb] bg-[linear-gradient(180deg,#fffef9_0%,#f3eadc_100%)] p-6 shadow-[0_18px_46px_-34px_rgba(44,31,17,0.42)]"
+      >
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.32em] text-[#8a7b67]">
+              <Sparkles size={14} />
+              Feedback Loop
+            </div>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-[#5d5245]">
+              Feed quick signals back into the evolutionary scorer so the next Webbooks lean harder into stronger evidence, cleaner structure, and sharper chapter focus.
+            </p>
+          </div>
+          <div className="rounded-full border border-[#cdbfae] bg-[#fff8ec] px-4 py-2 text-[10px] uppercase tracking-[0.24em] text-[#6b5b4a]">
+            {rewardProfile.sampleSize} rated books
+          </div>
+        </div>
+
+        {rewardProfile.sampleSize > 0 && (
+          <div className="mt-4 rounded-[20px] border border-[#e0d5c7] bg-[#fffdf8] px-4 py-3 text-sm leading-6 text-[#5d5245]">
+            Adaptive profile active.
+            {' '}
+            {dominantIssueSummary
+              ? `Current pressure is strongest around ${dominantIssueSummary}.`
+              : 'Positive and negative ratings are already nudging the next scoring pass.'}
+            {dominantCustomTagSummary ? ` Custom themes: ${dominantCustomTagSummary}.` : ''}
+          </div>
+        )}
+
+        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+          <div className="rounded-[22px] border border-[#e0d5c7] bg-[#fffdf7] p-5">
+            <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">This WebBook</div>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => toggleBookSignal('positive')}
+                className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] transition ${
+                  feedback?.bookSignal === 'positive'
+                    ? 'border-[#245c39] bg-[#e8f6ea] text-[#1f4f31]'
+                    : 'border-[#d8ccbd] bg-white text-[#5d5245] hover:border-[#245c39] hover:text-[#1f4f31]'
+                }`}
+              >
+                <ThumbsUp size={14} />
+                Helpful
+              </button>
+              <button
+                type="button"
+                onClick={() => toggleBookSignal('negative')}
+                className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] transition ${
+                  feedback?.bookSignal === 'negative'
+                    ? 'border-[#8c2f2f] bg-[#fdecec] text-[#7a2727]'
+                    : 'border-[#d8ccbd] bg-white text-[#5d5245] hover:border-[#8c2f2f] hover:text-[#7a2727]'
+                }`}
+              >
+                <ThumbsDown size={14} />
+                Needs Work
+              </button>
+            </div>
+
+            <div className="mt-5 flex flex-wrap gap-2">
+              {BOOK_FEEDBACK_TAGS.map((tag) => {
+                const selected = activeIssueTags.has(tag);
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => toggleBookIssueTag(tag)}
+                    className={`rounded-full border px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] transition ${
+                      selected
+                        ? 'border-[#1d1710] bg-[#1d1710] text-[#fffaf2]'
+                        : 'border-[#d8ccbd] bg-[#fffaf7] text-[#6b5b4a] hover:border-[#1d1710] hover:text-[#1d1710]'
+                    }`}
+                  >
+                    {FEEDBACK_TAG_LABELS[tag]}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-5 rounded-[18px] border border-[#e0d5c7] bg-white/70 p-4">
+              <div className="text-[10px] uppercase tracking-[0.22em] text-[#8a7b67]">Custom Tags</div>
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+                <input
+                  type="text"
+                  value={customTagInput}
+                  onChange={(event) => setCustomTagInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      addCustomTag();
+                    }
+                  }}
+                  placeholder="e.g. weak chronology, missing citations, better comparisons"
+                  className="min-w-0 flex-1 rounded-full border border-[#d8ccbd] bg-[#fffdf8] px-4 py-2 text-sm text-[#1d1710] outline-none transition focus:border-[#1d1710]"
+                />
+                <button
+                  type="button"
+                  onClick={addCustomTag}
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-[#1d1710] px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#1d1710] transition hover:bg-[#1d1710] hover:text-[#fffaf2]"
+                >
+                  <Plus size={12} />
+                  Add Tag
+                </button>
+              </div>
+
+              {customTags.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {customTags.map((tag) => (
+                    <div
+                      key={tag}
+                      className="inline-flex items-center gap-2 rounded-full border border-[#1d1710] bg-[#1d1710] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#fffaf2]"
+                    >
+                      <span>{tag}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeCustomTag(tag)}
+                        title={`Remove custom tag ${tag}`}
+                        className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-white/20 text-[#fffaf2] transition hover:border-[#efb8b8] hover:bg-[#8c2f2f] hover:text-white"
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-[22px] border border-[#e0d5c7] bg-[#fffdf7] p-5">
+            <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">Chapter Signals</div>
+            <div className="mt-4 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
+              {chapterRenderPlan.map(({ chapter }, index) => {
+                const chapterId = chapter.id || `${webBook.id}-chapter-${index + 1}`;
+                const chapterFeedback = feedback?.chapterFeedback?.[chapterId];
+                const heading = buildChapterHeading(chapter, index);
+
+                return (
+                  <div key={chapterId} className="min-w-0 rounded-[18px] border border-[#e0d5c7] bg-white p-3">
+                    <div className="text-[10px] uppercase tracking-[0.24em] text-[#8a7b67]">{heading.sequence}</div>
+                    <div className="mt-2 line-clamp-2 text-sm font-semibold leading-5 text-[#1d1710]">{heading.displayTitle}</div>
+                    <div className="mt-3 grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(88px,1fr))]">
+                      <button
+                        type="button"
+                        onClick={() => onUpdateChapterFeedback(webBook.id, chapterId, {
+                          signal: chapterFeedback?.signal === 'positive' ? null : 'positive',
+                        })}
+                        className={`inline-flex min-w-0 w-full items-center justify-center gap-1 rounded-full border px-2 py-2 text-[8px] font-semibold uppercase leading-tight tracking-[0.12em] transition sm:text-[9px] sm:gap-1.5 sm:tracking-[0.16em] ${
+                          chapterFeedback?.signal === 'positive'
+                            ? 'border-[#245c39] bg-[#e8f6ea] text-[#1f4f31]'
+                            : 'border-[#d8ccbd] bg-[#fffaf7] text-[#6b5b4a] hover:border-[#245c39] hover:text-[#1f4f31]'
+                        }`}
+                      >
+                        <ThumbsUp size={12} />
+                        Strong
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onUpdateChapterFeedback(webBook.id, chapterId, {
+                          signal: chapterFeedback?.signal === 'negative' ? null : 'negative',
+                        })}
+                        className={`inline-flex min-w-0 w-full items-center justify-center gap-1 rounded-full border px-2 py-2 text-[8px] font-semibold uppercase leading-tight tracking-[0.12em] transition sm:text-[9px] sm:gap-1.5 sm:tracking-[0.16em] ${
+                          chapterFeedback?.signal === 'negative'
+                            ? 'border-[#8c2f2f] bg-[#fdecec] text-[#7a2727]'
+                            : 'border-[#d8ccbd] bg-[#fffaf7] text-[#6b5b4a] hover:border-[#8c2f2f] hover:text-[#7a2727]'
+                        }`}
+                      >
+                        <ThumbsDown size={12} />
+                        Weak
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section id="page-1" data-pdf-page-number="1" data-pdf-page-kind="cover" className="web-book-page bg-[#141414] text-[#E4E3E0] p-16 relative overflow-hidden text-center min-h-[1000px] md:min-h-[1123px] flex flex-col justify-center border border-[#141414] shadow-[12px_12px_0px_0px_rgba(20,20,20,0.18)] print:shadow-none print:border-none print:block print:min-h-0 print:h-auto print:page-break-after-always">
         <div className="relative z-10">
           <div className="flex flex-col items-center gap-4 mb-8">

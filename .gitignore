@@ -6,6 +6,8 @@ dist/*
 !dist/.gitignore
 coverage/*
 !coverage/.gitignore
+data/*
+!data/.gitignore
 __pycache__/*
 !__pycache__/.gitignore
 engine/__pycache__/*

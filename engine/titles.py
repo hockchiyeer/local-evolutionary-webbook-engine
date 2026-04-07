@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Sequence, Set
 
 from .contracts import CHAPTER_TITLE_MAX_CHARS, CHAPTER_TITLE_MAX_WORDS
 from .nlp_graph import concept_crawl_depth, expand_semantic_phrases
+from .reinforcement import reward_weight
 
 
 QUESTION_FILLER_WORDS = {
@@ -161,6 +162,7 @@ def build_chapter_title(
     semantic_title_focus: str = "",
     chapter_index: int = 0,
     chapter_count: int = 10,
+    reward_profile: Dict[str, Any] | None = None,
     tokenize: Callable[[str], Sequence[str]],
     stop_words: Set[str],
     normalize_term_key: Callable[[str], str],
@@ -172,6 +174,7 @@ def build_chapter_title(
     candidate_bonus_by_key: Dict[str, float] = {}
     target_layer = _chapter_depth_target(chapter_index, chapter_count)
     semantic_focus_key = _semantic_key(semantic_title_focus)
+    title_specificity = reward_weight(reward_profile, "titleSpecificity")
 
     def add_candidate(value: str, bonus: float = 0.0) -> None:
         if not value:
@@ -272,9 +275,11 @@ def build_chapter_title(
         query_overlap_ratio = len(token_set.intersection(focus_words)) / max(len(token_set), 1)
         overlap_score += (1.0 - query_overlap_ratio) * 0.16
         if low_signal_tokens:
-            overlap_score -= min(0.24 * len(low_signal_tokens), 0.58)
+            overlap_score -= min(0.24 * len(low_signal_tokens), 0.58) * title_specificity
         if len(token_set) == 1:
-            overlap_score -= 0.16
+            overlap_score -= 0.16 * title_specificity
+        if len(token_set) >= 2 and low_signal_tokens != token_set:
+            overlap_score += max(0.0, title_specificity - 1.0) * 0.18
         semantic_candidate_key = _semantic_key(candidate)
         overlap_score += candidate_bonus_by_key.get(semantic_candidate_key, 0.0)
         depth_info = depth_map.get(semantic_candidate_key)

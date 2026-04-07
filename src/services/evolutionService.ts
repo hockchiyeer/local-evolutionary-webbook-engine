@@ -1,4 +1,4 @@
-import { SearchSourceConfig, SearchSourceKey, WebPageGenotype } from "../types";
+import { RewardProfile, SearchSourceConfig, SearchSourceKey, WebBook, WebPageGenotype } from "../types";
 
 export type SearchBatchProvider = SearchSourceKey | "manual" | "local-synthesis";
 
@@ -404,11 +404,50 @@ export async function searchAndExtract(
 export async function evolve(
   population: WebPageGenotype[],
   query: string,
-  generations: number = 3
+  generations: number = 3,
+  rewardProfile?: RewardProfile,
 ): Promise<WebPageGenotype[]> {
-  return await callApi("evolve", { query, population, generations });
+  return await callApi("evolve", { query, population, generations, rewardProfile });
 }
 
-export async function assembleWebBook(optimalPopulation: WebPageGenotype[], topic: string): Promise<any> {
-  return await callApi("assemble", { query: topic, population: optimalPopulation });
+export async function assembleWebBook(
+  optimalPopulation: WebPageGenotype[],
+  topic: string,
+  rewardProfile?: RewardProfile,
+): Promise<any> {
+  return await callApi("assemble", { query: topic, population: optimalPopulation, rewardProfile });
+}
+
+export interface FeedbackLearningResponse {
+  rewardProfile: RewardProfile;
+  recordCount: number;
+  updatedAt: number | null;
+}
+
+function serializeFeedbackBook(book: WebBook) {
+  return {
+    id: book.id,
+    topic: book.topic,
+    topicArea: book.topicArea,
+    timestamp: book.timestamp,
+    chapters: book.chapters.map((chapter, index) => ({
+      id: chapter.id || `${book.id}-chapter-${index + 1}`,
+      title: chapter.title,
+    })),
+    feedback: book.feedback,
+  };
+}
+
+export async function getPersistentRewardProfile(): Promise<FeedbackLearningResponse> {
+  return await callApi("feedback/profile", {});
+}
+
+export async function savePersistentFeedback(book: WebBook): Promise<FeedbackLearningResponse> {
+  return await callApi("feedback/upsert", { book: serializeFeedbackBook(book) });
+}
+
+export async function bootstrapPersistentFeedback(books: WebBook[]): Promise<FeedbackLearningResponse> {
+  return await callApi("feedback/bootstrap", {
+    books: books.map((book) => serializeFeedbackBook(book)),
+  });
 }

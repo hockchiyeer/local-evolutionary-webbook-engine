@@ -21,6 +21,7 @@ The result is a multi-chapter reading experience built from live source intake, 
 - assembles a 10-chapter WebBook with definitions, subtopics, and source citations
 - exposes the real pipeline stages and source telemetry in the portal UI
 - stores generated books in browser history
+- persists feedback-driven reward learning in a shared SQLite store
 - exports to PDF, Print / Save as PDF, Word-compatible HTML, HTML, and TXT
 
 ## Free/Public Source Mix
@@ -66,6 +67,15 @@ The core runtime flow is:
    Applies local feature scoring, redundancy penalties, crossover, mutation, and ranked source selection.
 4. `Book assembly`
    Builds chapter clusters, semantic title paths, sentence-level micro-GA selection, and final chapter structure.
+
+## Adaptive Feedback Persistence
+
+User feedback on whole books, chapter quality, and custom tags is now persisted in a backend SQLite store at `data/feedback-learning.sqlite`.
+
+- the server automatically migrates the older JSON learning store on startup when present
+- stored feedback is shared across sessions and machines that use the same backend instance
+- the persisted reward profile is fed back into later `evolve` and `assemble` runs to strengthen the local learning loop
+- `npm run clean` preserves the persisted learning store files under `data/`
 
 ## UI Mapping
 
@@ -131,6 +141,7 @@ The portal UI now exposes the real runtime model:
 |   |-- smoke/
 |   `-- unit/
 |-- evolution_engine.py
+|-- feedbackStore.ts
 |-- server.ts
 |-- package.json
 |-- requirements.txt
@@ -182,7 +193,9 @@ Useful commands:
 
 ```bash
 npm run build
+npm run clean
 npm run lint
+npm run test:clean
 python -m unittest discover
 ```
 
