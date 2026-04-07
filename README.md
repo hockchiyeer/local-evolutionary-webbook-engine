@@ -2,6 +2,8 @@
 
 This repository generates a structured "WebBook" from a topic prompt without using paid commercial LLMs or commercial API dependencies.
 
+👉 You can explore the live application built from this repository’s source code at: [https://ai.studio/apps/7481953a-4b23-442b-ad65-93d3b601ffc0?fullscreenApplet=true](https://ai.studio/apps/7481953a-4b23-442b-ad65-93d3b601ffc0?fullscreenApplet=true)
+
 The stack combines:
 
 - a React + Vite frontend
