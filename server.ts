@@ -6,6 +6,7 @@ import path from "path";
 import { spawn } from "child_process";
 import cors from "cors";
 import { persistentFeedbackStore } from "./feedbackStore";
+import { buildSearchFallbackPayload } from "./server/searchFallback";
 import type { ChapterFeedback, FeedbackIssueTag, FeedbackSignal, RewardProfile, RewardWeightProfile, WebBookFeedback } from "./src/types";
 
 type PersistedFeedbackChapter = {
@@ -668,6 +669,23 @@ async function startServer() {
   });
 
   // API Routes for evolution
+  app.get("/api/search-fallback", async (req, res) => {
+    const query = String(req.query.query || "").trim();
+    if (!query) {
+      return res.status(400).json({ error: "Query is required" });
+    }
+
+    try {
+      const payload = await buildSearchFallbackPayload(query);
+      return res.json(payload);
+    } catch (error: any) {
+      console.error("Supplemental search fallback failed:", error);
+      return res.status(502).json({
+        error: error?.message || "Unable to extract supplemental live-search results at the moment.",
+      });
+    }
+  });
+
   app.post("/api/search", (req, res) => {
     const { query, sourceConfig } = req.body;
     if (!query) return res.status(400).json({ error: "Query is required" });

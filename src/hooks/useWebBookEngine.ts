@@ -649,6 +649,12 @@ export const getProviderDescriptor = (provider: string) => {
         category: "Fallback layer",
         description: "Adaptive local fallback used when live retrieval yields no viable frontier.",
       };
+    case "search-fallback":
+      return {
+        label: "Live Search Fallback",
+        category: "Supplemental",
+        description: "Query-variant Google and DuckDuckGo evidence blended in when the frontier is thin or blocked.",
+      };
     default:
       return fallbackProviderDescriptor(provider);
   }
@@ -746,6 +752,19 @@ export const applySearchProgressToStatuses = (
         frontierCount: progress.mergedResults.length,
         error: null,
       };
+    } else {
+      const descriptor = getProviderDescriptor(progress.provider);
+      nextStatuses.push({
+        provider: progress.provider,
+        label: descriptor.label,
+        category: descriptor.category,
+        description: descriptor.description,
+        status: 'running',
+        resultCount: 0,
+        frontierCount: progress.mergedResults.length,
+        durationMs: progress.durationMs ?? null,
+        error: null,
+      });
     }
     return nextStatuses;
   }

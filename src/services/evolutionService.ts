@@ -1,6 +1,6 @@
-import { RewardProfile, SearchSourceConfig, SearchSourceKey, WebBook, WebPageGenotype } from "../types";
+import { RewardProfile, SearchFallbackPayload, SearchSourceConfig, SearchSourceKey, WebBook, WebPageGenotype } from "../types";
 
-export type SearchBatchProvider = SearchSourceKey | "manual" | "local-synthesis";
+export type SearchBatchProvider = SearchSourceKey | "manual" | "local-synthesis" | "search-fallback";
 
 export interface SearchProgressUpdate {
   provider: SearchBatchProvider;
@@ -34,6 +34,9 @@ const SEARCH_PROVIDER_ORDER: SearchSourceKey[] = [
   "google",
   "bing",
 ];
+
+const WEB_SEARCH_PROVIDER_KEYS: SearchSourceKey[] = ["duckduckgo", "google", "bing"];
+const SEARCH_FALLBACK_MAX_MERGE_COUNT = 12;
 
 function deepDecodeUtf8(obj: any): any {
   if (typeof obj === 'string') {
@@ -221,6 +224,138 @@ function normalizeSearchResult(rawResult: any, index: number): WebPageGenotype {
   };
 }
 
+function average(values: number[]): number {
+  if (values.length === 0) {
+    return 0;
+  }
+
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function canUseLiveSearchFallback(sourceConfig: SearchSourceConfig): boolean {
+  return WEB_SEARCH_PROVIDER_KEYS.some((provider) => sourceConfig.sources[provider]);
+}
+
+function buildSearchFallbackDecision(results: WebPageGenotype[], errors: string[]) {
+  const providerCount = new Set(
+    results.flatMap((result) => uniqueProviders(result)).filter((provider) => provider && provider !== "page-fetch")
+  ).size;
+  const richResultCount = results.filter((result) => {
+    const structureCount = (result.definitions?.length || 0) + (result.subTopics?.length || 0);
+    return result.content.length >= 360 || structureCount >= 3;
+  }).length;
+  const avgInformative = average(results.map((result) => Number(result.informativeScore || 0)));
+  const avgAuthority = average(results.map((result) => Number(result.authorityScore || 0)));
+  const reasons: string[] = [];
+
+  if (results.length === 0) {
+    reasons.push("no-frontier");
+  }
+  if (results.length > 0 && results.length < 6) {
+    reasons.push("thin-frontier");
+  }
+  if (results.length > 0 && providerCount < 3) {
+    reasons.push("low-provider-diversity");
+  }
+  if (results.length > 0 && richResultCount < Math.min(4, Math.max(2, Math.ceil(results.length * 0.45)))) {
+    reasons.push("shallow-evidence");
+  }
+  if (results.length > 0 && (avgInformative < 0.6 || avgAuthority < 0.62)) {
+    reasons.push("weak-frontier-signals");
+  }
+  if (errors.length > 0 && results.length < 12) {
+    reasons.push("provider-failures");
+  }
+
+  if (reasons.length === 0) {
+    return {
+      shouldSupplement: false,
+      desiredCount: 0,
+    };
+  }
+
+  let desiredCount = 8;
+  if (results.length === 0) {
+    desiredCount = 12;
+  } else if (results.length < 4 || providerCount < 2) {
+    desiredCount = 10;
+  }
+
+  if (errors.length > 0) {
+    desiredCount += 2;
+  }
+
+  return {
+    shouldSupplement: true,
+    desiredCount: Math.min(SEARCH_FALLBACK_MAX_MERGE_COUNT, desiredCount),
+  };
+}
+
+function estimateFallbackAuthority(domain: string): number {
+  const normalizedDomain = domain.toLowerCase();
+
+  if (normalizedDomain.includes("wikipedia.org")) return 0.92;
+  if (normalizedDomain.endsWith(".gov")) return 0.88;
+  if (normalizedDomain.endsWith(".edu")) return 0.84;
+  if (normalizedDomain.endsWith(".org")) return 0.78;
+  if (normalizedDomain.endsWith(".com")) return 0.68;
+  return 0.63;
+}
+
+function estimateFallbackInformative(content: string, query: string): number {
+  const normalizedContent = content.toLowerCase();
+  const queryTokens = query
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3);
+  const overlap = queryTokens.length === 0
+    ? 0
+    : queryTokens.filter((token) => normalizedContent.includes(token)).length / queryTokens.length;
+  const lengthScore = Math.min(content.length / 540, 1);
+
+  return Number(Math.min(0.92, Math.max(0.48, (overlap * 0.55) + (lengthScore * 0.45))).toFixed(4));
+}
+
+function buildFallbackResultContent(
+  payload: SearchFallbackPayload,
+  result: SearchFallbackPayload["results"][number],
+): string {
+  const parts = [result.title, result.snippet, result.excerpt];
+  return parts
+    .filter(Boolean)
+    .map((part) => String(part).trim())
+    .join(". ")
+    .replace(/\.\s+\./g, ".")
+    .slice(0, 2400)
+    || payload.summary.slice(0, 2400);
+}
+
+function mapSearchFallbackPayloadToPopulation(
+  payload: SearchFallbackPayload,
+  query: string,
+  desiredCount: number,
+): WebPageGenotype[] {
+  return payload.results.slice(0, desiredCount).map((result, index) => {
+    const content = buildFallbackResultContent(payload, result);
+    const providers = Array.from(new Set([result.provider, "search-fallback"]));
+
+    return {
+      id: `fallback-${payload.extractedAt}-${index}`,
+      url: result.url,
+      title: result.title || `${result.domain} reference`,
+      content,
+      definitions: [],
+      subTopics: [],
+      informativeScore: estimateFallbackInformative(content, query),
+      authorityScore: estimateFallbackAuthority(result.domain),
+      fitness: 0,
+      searchProvider: result.provider,
+      searchProviders: providers,
+    };
+  });
+}
+
 function dedupeDefinitionList(definitions: WebPageGenotype["definitions"]) {
   const seen = new Set<string>();
 
@@ -368,6 +503,58 @@ export async function searchAndExtract(
   } else {
     for (const { provider, config } of batchConfigs) {
       await runBatch(provider, config);
+    }
+  }
+
+  const fallbackDecision = canUseLiveSearchFallback(sourceConfig)
+    ? buildSearchFallbackDecision(mergedResults, errors)
+    : { shouldSupplement: false, desiredCount: 0 };
+
+  if (fallbackDecision.shouldSupplement) {
+    const startedAt = Date.now();
+    onProgress?.({
+      provider: "search-fallback",
+      phase: "started",
+      batchResults: [],
+      mergedResults,
+      completed,
+      total: batchConfigs.length + 1,
+      durationMs: 0,
+    });
+
+    try {
+      const { fetchSearchFallback } = await import("./searchFallbackService");
+      const payload = await fetchSearchFallback(query);
+      const fallbackResults = mapSearchFallbackPayloadToPopulation(payload, query, fallbackDecision.desiredCount);
+
+      if (fallbackResults.length > 0) {
+        mergedResults = mergeSearchResults(mergedResults, fallbackResults);
+      }
+
+      completed += 1;
+      onProgress?.({
+        provider: "search-fallback",
+        phase: "completed",
+        batchResults: fallbackResults,
+        mergedResults,
+        completed,
+        total: batchConfigs.length + 1,
+        durationMs: Date.now() - startedAt,
+      });
+    } catch (error: any) {
+      completed += 1;
+      const message = error?.message || "Supplemental live search failed";
+      errors.push(message);
+      onProgress?.({
+        provider: "search-fallback",
+        phase: "completed",
+        batchResults: [],
+        mergedResults,
+        completed,
+        total: batchConfigs.length + 1,
+        durationMs: Date.now() - startedAt,
+        error: message,
+      });
     }
   }
 

@@ -53,6 +53,29 @@ export interface WebPageGenotype {
   searchProviders: string[];
 }
 
+export type SearchFallbackSource = "google-search-snippets" | "alternate-search-snippets";
+export type SearchFallbackProvider = "google" | "duckduckgo";
+
+export interface SearchFallbackResult {
+  title: string;
+  url: string;
+  domain: string;
+  snippet: string;
+  excerpt?: string;
+  provider: SearchFallbackProvider;
+}
+
+export interface SearchFallbackPayload {
+  query: string;
+  source: SearchFallbackSource;
+  provider: SearchFallbackProvider;
+  summary: string;
+  aiOverview: string[];
+  results: SearchFallbackResult[];
+  extractedAt: number;
+  diagnostics?: string[];
+}
+
 export interface Chapter {
   id?: string;
   title: string;

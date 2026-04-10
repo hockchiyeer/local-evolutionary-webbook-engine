@@ -9,6 +9,7 @@ import { ControlSidebar } from './components/ControlSidebar';
 import { AppHeader } from './components/AppHeader';
 import { HistoryDrawer } from './components/HistoryDrawer';
 import { WebBookViewer } from './components/WebBookViewer';
+import { WebBookErrorBoundary } from './components/WebBookErrorBoundary';
 import { exportWebBookToPdf, printWebBook, exportWebBookToWord, exportWebBookToHtml, exportWebBookToTxt } from './services/exportService';
 import { motion, AnimatePresence } from 'motion/react';
 import { Infinity as InfinityIcon } from 'lucide-react';
@@ -308,12 +309,14 @@ export default function App() {
                 exit={{ opacity: 0, scale: 0.95 }}
                 className="w-full flex justify-center"
               >
-                <WebBookViewer
-                  webBook={activeWebBook}
-                  rewardProfile={engine.rewardProfile}
-                  onUpdateWebBookFeedback={engine.updateWebBookFeedback}
-                  onUpdateChapterFeedback={engine.updateChapterFeedback}
-                />
+                <WebBookErrorBoundary key={activeWebBook.id}>
+                  <WebBookViewer
+                    webBook={activeWebBook}
+                    rewardProfile={engine.rewardProfile}
+                    onUpdateWebBookFeedback={engine.updateWebBookFeedback}
+                    onUpdateChapterFeedback={engine.updateChapterFeedback}
+                  />
+                </WebBookErrorBoundary>
               </motion.div>
             ) : engine.state.status === 'idle' ? (
               <motion.div

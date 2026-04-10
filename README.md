@@ -54,6 +54,7 @@ The repo now aims to reduce "mechanical template-like" output by widening the so
 - repeated SERP phrasing is cleaned before ranking
 - `Open Library` adds book-oriented context
 - `Crossref` adds research-oriented context
+- a supplemental live-search fallback can blend additional Google and DuckDuckGo evidence when the frontier is still thin after the primary provider passes
 - result caps and time budgets are increased so the engine can work with a broader frontier
 - the UI now maps real engine stages and source-provider progress instead of showing decorative progress only
 
@@ -108,6 +109,7 @@ The portal UI now exposes the real runtime model:
 - Express 4
 - CORS
 - `tsx` for development
+- `server/searchFallback.ts` for query-variant supplemental Google and DuckDuckGo evidence recovery
 
 ### Python Engine
 
@@ -145,16 +147,20 @@ The portal UI now exposes the real runtime model:
 |   |-- clean.mjs
 |   |-- clean-safe.mjs
 |   `-- clean-test.mjs
+|-- server/
+|   `-- searchFallback.ts
 |-- src/
 |   |-- components/
 |   |   |-- AppHeader.tsx
 |   |   |-- ControlSidebar.tsx
 |   |   |-- HistoryDrawer.tsx
+|   |   |-- WebBookErrorBoundary.tsx
 |   |   `-- WebBookViewer.tsx
 |   |-- hooks/
 |   |   `-- useWebBookEngine.ts
 |   |-- services/
 |   |   |-- evolutionService.ts
+|   |   |-- searchFallbackService.ts
 |   |   `-- exportService.ts
 |   |-- utils/
 |   |   `-- webBookRender.ts
