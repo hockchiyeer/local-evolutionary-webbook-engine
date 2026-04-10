@@ -2,7 +2,7 @@
 
 This repository generates a structured "WebBook" from a topic prompt without using paid commercial LLMs or commercial API dependencies.
 
-👉 You can explore the live application built from this repository’s source code at: [https://ai.studio/apps/7481953a-4b23-442b-ad65-93d3b601ffc0?fullscreenApplet=true](https://ai.studio/apps/7481953a-4b23-442b-ad65-93d3b601ffc0?fullscreenApplet=true)
+You can explore the live application built from this repository's source code at: [https://ai.studio/apps/7481953a-4b23-442b-ad65-93d3b601ffc0?fullscreenApplet=true](https://ai.studio/apps/7481953a-4b23-442b-ad65-93d3b601ffc0?fullscreenApplet=true)
 
 The stack combines:
 
@@ -24,7 +24,7 @@ The result is a multi-chapter reading experience built from live source intake, 
 - exposes the real pipeline stages and source telemetry in the portal UI
 - stores generated books in browser history
 - persists feedback-driven reward learning in a shared SQLite store
-- exports to PDF, Print / Save as PDF, Word-compatible HTML, HTML, and TXT
+- exports to PDF, Print / Save as PDF, native Word `.docx`, HTML, and TXT
 
 ## Free/Public Source Mix
 
@@ -109,7 +109,9 @@ The portal UI now exposes the real runtime model:
 - Express 4
 - CORS
 - `tsx` for development
+- `feedbackStore.ts` for shared SQLite-backed learning persistence
 - `server/searchFallback.ts` for query-variant supplemental Google and DuckDuckGo evidence recovery
+- `server/pdfBridge.ts` for local Puppeteer-based high-resolution PDF generation
 
 ### Python Engine
 
@@ -148,6 +150,7 @@ The portal UI now exposes the real runtime model:
 |   |-- clean-safe.mjs
 |   `-- clean-test.mjs
 |-- server/
+|   |-- pdfBridge.ts
 |   `-- searchFallback.ts
 |-- src/
 |   |-- components/
@@ -159,6 +162,7 @@ The portal UI now exposes the real runtime model:
 |   |-- hooks/
 |   |   `-- useWebBookEngine.ts
 |   |-- services/
+|   |   |-- docxExport.ts
 |   |   |-- evolutionService.ts
 |   |   |-- searchFallbackService.ts
 |   |   `-- exportService.ts
@@ -207,6 +211,8 @@ The portal UI now exposes the real runtime model:
 |-- tsconfig.json
 `-- vite.config.ts
 ```
+
+Generated output directories such as `build/` and `dist/` are intentionally omitted from the tree above.
 
 ## Setup
 

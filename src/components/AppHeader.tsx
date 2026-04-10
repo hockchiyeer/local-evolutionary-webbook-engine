@@ -146,7 +146,7 @@ export function AppHeader({
                         title="Export as Microsoft Word document for editing"
                         className="w-full px-4 py-3 text-left text-[10px] uppercase font-bold hover:bg-[#F5F5F5] flex items-center gap-3 border-b border-[#141414]/10"
                       >
-                        <FileText size={14} className="text-blue-600" /> Word (.doc)
+                        <FileText size={14} className="text-blue-600" /> Word (.docx)
                       </button>
                       <button
                         onClick={() => void runExport(onExportHtml)}

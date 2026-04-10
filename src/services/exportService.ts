@@ -1,6 +1,7 @@
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import type { WebBook } from '../types';
+import { buildWebBookDocx, type DocxChapterImageAsset } from './docxExport';
 
 type PdfLinkAnnotation = {
   sourcePageNumber: number;
@@ -66,6 +67,55 @@ function downloadBlob(blob: Blob, fileName: string): void {
   URL.revokeObjectURL(url);
 }
 
+function parseDataUrlImage(src: string): DocxChapterImageAsset | null {
+  const match = /^data:(image\/(?:jpeg|png|gif));base64,(.+)$/i.exec(src);
+  if (!match) return null;
+
+  const [, rawContentType, base64Payload] = match;
+  const contentType = rawContentType.toLowerCase() as DocxChapterImageAsset['contentType'];
+  const extension = contentType === 'image/png'
+    ? 'png'
+    : contentType === 'image/gif'
+      ? 'gif'
+      : 'jpeg';
+
+  const binary = window.atob(base64Payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return {
+    altText: '',
+    bytes,
+    contentType,
+    extension,
+    widthPx: 1,
+    heightPx: 1,
+  };
+}
+
+function collectWordChapterImages(root: HTMLElement): Array<DocxChapterImageAsset | null> {
+  return Array.from(root.querySelectorAll<HTMLElement>('[data-pdf-page-kind="chapter"]'))
+    .map((chapterSection) => {
+      const image = chapterSection.querySelector<HTMLImageElement>('img');
+      if (!image?.src) return null;
+
+      const parsed = parseDataUrlImage(image.src);
+      if (!parsed) return null;
+
+      const exportedWidth = Number(image.dataset.exportWidth || image.dataset.exportOriginalWidth || image.naturalWidth || image.width || 0);
+      const exportedHeight = Number(image.dataset.exportHeight || image.dataset.exportOriginalHeight || image.naturalHeight || image.height || 0);
+
+      return {
+        ...parsed,
+        altText: image.alt || 'Chapter image',
+        widthPx: Math.max(1, Math.round(exportedWidth || 1)),
+        heightPx: Math.max(1, Math.round(exportedHeight || 1)),
+      };
+    });
+}
+
 async function inlineImagesForExport(
   root: HTMLElement,
   options: { maxDimension: number; quality: number; hideOnError?: boolean }
@@ -101,6 +151,9 @@ async function inlineImagesForExport(
           throw new Error('Image dimensions unavailable');
         }
 
+        img.dataset.exportOriginalWidth = String(originalWidth);
+        img.dataset.exportOriginalHeight = String(originalHeight);
+
         let width = originalWidth;
         let height = originalHeight;
         if (width > options.maxDimension || height > options.maxDimension) {
@@ -117,6 +170,8 @@ async function inlineImagesForExport(
         canvas.height = height;
         ctx.drawImage(tempImg, 0, 0, width, height);
         img.src = canvas.toDataURL('image/jpeg', options.quality);
+        img.dataset.exportWidth = String(width);
+        img.dataset.exportHeight = String(height);
         img.style.filter = 'none';
         img.style.boxShadow = 'none';
         img.className = img.className.replace(/grayscale|hover:grayscale-0/g, '');
@@ -340,93 +395,22 @@ export async function exportWebBookToHtml(webBook: WebBook): Promise<void> {
   downloadBlob(blob, getExportFileName(webBook.topic, 'html'));
 }
 
+
 export async function exportWebBookToWord(webBook: WebBook): Promise<void> {
   const clone = createExportClone();
 
   clone.querySelectorAll(EXPORT_UI_IGNORED_SELECTOR).forEach((node) => node.remove());
-
-  const images = clone.querySelectorAll('img');
-  for (const image of Array.from(images)) {
-    try {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      const tempImg = new Image();
-      tempImg.crossOrigin = 'anonymous';
-
-      await new Promise((resolve, reject) => {
-        tempImg.onload = resolve;
-        tempImg.onerror = reject;
-        tempImg.src = image.src;
-      });
-
-      canvas.width = tempImg.width;
-      canvas.height = tempImg.height;
-      ctx?.drawImage(tempImg, 0, 0);
-      image.src = canvas.toDataURL('image/jpeg', 0.8);
-      image.style.filter = 'none';
-      image.className = image.className.replace(/grayscale|hover:grayscale-0/g, '');
-    } catch (error) {
-      console.error('Failed to convert image to base64 for Word export', error);
-      try {
-        const response = await fetch(image.src, { mode: 'cors' });
-        if (response.ok) {
-          const blob = await response.blob();
-          const base64 = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
-          image.src = base64;
-        }
-      } catch (fallbackError) {
-        console.error('Fetch fallback also failed', fallbackError);
-      }
-    }
-
-    image.style.maxWidth = '100%';
-    image.style.height = 'auto';
-    image.style.display = 'block';
-    image.style.margin = '20px auto';
-  }
-
-  clone.querySelectorAll('[id]').forEach((node) => {
-    const id = node.getAttribute('id');
-    if (!id) return;
-
-    const anchor = document.createElement('a');
-    anchor.setAttribute('name', id);
-    node.prepend(anchor);
+  await inlineImagesForExport(clone, {
+    maxDimension: 1400,
+    quality: 0.88,
   });
 
-  if (!clone.querySelector('a[name="top"]')) {
-    const topAnchor = document.createElement('a');
-    topAnchor.setAttribute('name', 'top');
-    clone.prepend(topAnchor);
-  }
-
-  prepareWordFooterForExport(clone);
-
-  const htmlContent = clone.outerHTML;
-  const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' " +
-    "xmlns:w='urn:schemas-microsoft-com:office:word' " +
-    "xmlns='http://www.w3.org/TR/REC-html40'>" +
-    "<head><meta charset='utf-8'><title>WebBook Export</title>" +
-    "<style>" +
-    "body { font-family: 'Arial', sans-serif; } " +
-    "img { max-width: 100%; height: auto; display: block; margin: 20px auto; } " +
-    "h2, h3, h4 { font-family: 'Georgia', serif; } " +
-    "a { text-decoration: none; color: inherit; } " +
-    ".font-mono { font-family: 'Courier New', monospace; } " +
-    "</style></head><body>";
-  const footer = '</body></html>';
-  const sourceHtml = header + htmlContent + footer;
-
-  const blob = new Blob(['\ufeff', sourceHtml], {
-    type: 'application/msword',
+  const chapterImages = collectWordChapterImages(clone);
+  const blob = new Blob([buildWebBookDocx(webBook, chapterImages)], {
+    type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   });
 
-  downloadBlob(blob, getExportFileName(webBook.topic, 'doc'));
+  downloadBlob(blob, getExportFileName(webBook.topic, 'docx'));
 }
 
 async function exportWebBookToPdfViaPuppeteer(webBook: WebBook): Promise<void> {
@@ -467,7 +451,6 @@ async function exportWebBookToPdfViaPuppeteer(webBook: WebBook): Promise<void> {
         .web-book-page {
           break-after: page;
           page-break-after: always;
-          padding: 24mm;
         }
 
         .web-book-page:last-child {
@@ -658,7 +641,6 @@ export async function printWebBook(webBook: WebBook): Promise<void> {
               border: none !important;
               box-shadow: none !important;
               margin: 0 !important;
-              padding: 1.5cm !important;
               min-height: auto !important;
               height: auto !important;
               box-sizing: border-box !important;

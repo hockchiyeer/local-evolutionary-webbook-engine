@@ -339,22 +339,22 @@ export function WebBookViewer({
         <div className="absolute bottom-12 left-1/2 -translate-x-1/2 text-[10px] font-mono opacity-40 print:hidden">PAGE 1</div>
       </section>
 
-      <section id="page-2" data-pdf-page-number="2" data-pdf-page-kind="toc" className="web-book-page p-12 md:p-20 bg-[#FAFAFA] min-h-[1000px] md:min-h-[1123px] flex flex-col relative border border-[#141414] shadow-[12px_12px_0px_0px_rgba(20,20,20,0.12)] print:shadow-none print:border-none print:block print:min-h-0 print:h-auto print:page-break-after-always">
-        <div className="flex flex-col gap-4 border-b border-[#141414]/12 pb-8 md:flex-row md:items-end md:justify-between">
+      <section id="page-2" data-pdf-page-number="2" data-pdf-page-kind="toc" className="web-book-page p-10 md:p-14 bg-[#FAFAFA] min-h-[1000px] md:min-h-[1123px] flex flex-col relative border border-[#141414] shadow-[12px_12px_0px_0px_rgba(20,20,20,0.12)] print:shadow-none print:border-none print:block print:min-h-0 print:h-auto print:page-break-after-always">
+        <div className="flex flex-col gap-3 border-b border-[#141414]/12 pb-6 md:flex-row md:items-end md:justify-between">
           <div>
             <h3 className="text-[14px] uppercase font-bold tracking-[0.3em] inline-block self-start">Table of Contents</h3>
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-[#5c5041]">
+            <p className="mt-3 max-w-2xl text-[13px] leading-6 text-[#5c5041]">
               The current run has been organized as a {topicAreaLabel.toLowerCase()} so the book can move from the strongest structural anchors into deeper analysis.
             </p>
           </div>
-          <div className="inline-flex items-center rounded-full border border-[#d7cab8] bg-[#fffdf8] px-4 py-2 text-[10px] uppercase tracking-[0.24em] text-[#6f6252]">
+          <div className="inline-flex items-center rounded-full border border-[#d7cab8] bg-[#fffdf8] px-3.5 py-1.5 text-[10px] uppercase tracking-[0.24em] text-[#6f6252]">
             {chapterRenderPlan.length} sections
           </div>
         </div>
 
-        <div className="relative mt-10 flex-1">
-          <div className="absolute bottom-8 left-7 top-4 w-px bg-[linear-gradient(180deg,rgba(29,23,16,0.05)_0%,rgba(29,23,16,0.35)_50%,rgba(29,23,16,0.05)_100%)]" />
-          <div className="space-y-4">
+        <div className="relative mt-8 flex-1">
+          <div className="absolute bottom-6 left-6 hidden w-px bg-[linear-gradient(180deg,rgba(29,23,16,0.05)_0%,rgba(29,23,16,0.35)_50%,rgba(29,23,16,0.05)_100%)] md:block print:hidden top-3" />
+          <div className="grid gap-3 md:grid-cols-2 md:gap-4 print:gap-x-6 print:gap-y-2">
             {chapterRenderPlan.map(({ chapter, titlePageNumber }, index) => {
               const heading = buildChapterHeading(chapter, index);
 
@@ -364,23 +364,23 @@ export function WebBookViewer({
                   href={`#chapter-${index}`}
                   data-pdf-target-page={titlePageNumber}
                   title={`Navigate to Chapter ${index + 1}`}
-                  className="group relative grid grid-cols-[auto,minmax(0,1fr),auto] gap-4 rounded-[30px] border border-[#e1d6c8] bg-[#fffdf8]/90 p-5 shadow-[0_18px_34px_-30px_rgba(34,24,12,0.38)] transition hover:border-[#1d1710] hover:translate-x-[2px]"
+                  className="group relative grid grid-cols-[auto,minmax(0,1fr),auto] gap-3 rounded-[26px] border border-[#e1d6c8] bg-[#fffdf8]/90 p-4 print:p-3 print:break-inside-avoid shadow-[0_18px_34px_-30px_rgba(34,24,12,0.38)] transition hover:border-[#1d1710] hover:translate-x-[2px]"
                 >
-                  <span className="relative z-10 flex h-14 w-14 items-center justify-center">
+                  <span className="relative z-10 flex h-12 w-12 items-center justify-center print:h-10 print:w-10">
                     <span className="absolute inset-0 rounded-full border border-[#1d1710]/12" />
                     <span className="absolute inset-0 rounded-full border border-dashed border-[#1d1710]/38 webbook-orbit" style={{ animationDuration: '12s' }} />
                     <span className="absolute inset-[7px] rounded-full border border-[#1d1710]/16 webbook-orbit-reverse" style={{ animationDuration: '18s' }} />
-                    <span className="relative text-sm font-semibold tracking-[0.18em] text-[#1d1710]">{heading.sequence}</span>
+                    <span className="relative text-xs font-semibold tracking-[0.18em] text-[#1d1710]">{heading.sequence}</span>
                   </span>
 
                   <span className="min-w-0">
                     <span className="text-[10px] uppercase tracking-[0.28em] text-[#8a7b67]">{heading.facetLabel}</span>
-                    <span className="mt-2 block text-lg md:text-[1.45rem] font-medium leading-tight text-[#1d1710] break-words">{heading.displayTitle}</span>
+                    <span className="mt-1.5 print:mt-1 block text-base md:text-[1.18rem] print:text-base font-medium leading-snug text-[#1d1710] break-words">{heading.displayTitle}</span>
                   </span>
 
                   <span className="self-center text-right">
                     <span className="block text-[10px] uppercase tracking-[0.22em] text-[#8a7b67]">Page</span>
-                    <span className="mt-2 inline-flex rounded-full border border-[#d8ccbd] bg-white px-3 py-1 font-mono text-sm text-[#1d1710]">P.{titlePageNumber}</span>
+                    <span className="mt-1.5 print:mt-1 inline-flex rounded-full border border-[#d8ccbd] bg-white px-2.5 py-1 font-mono text-xs text-[#1d1710]">P.{titlePageNumber}</span>
                   </span>
                 </a>
               );
@@ -388,7 +388,7 @@ export function WebBookViewer({
           </div>
         </div>
 
-        <div className="mt-auto pt-12 flex justify-center text-[10px] font-mono opacity-40 print:hidden">PAGE 2</div>
+        <div className="mt-auto pt-8 flex justify-center text-[10px] font-mono opacity-40 print:hidden">PAGE 2</div>
       </section>
 
       <div className="space-y-8">
