@@ -6,6 +6,7 @@ import path from "path";
 import { spawn } from "child_process";
 import cors from "cors";
 import { persistentFeedbackStore } from "./feedbackStore";
+import { generatePdf } from "./server/pdfBridge";
 import { buildSearchFallbackPayload } from "./server/searchFallback";
 import type { ChapterFeedback, FeedbackIssueTag, FeedbackSignal, RewardProfile, RewardWeightProfile, WebBookFeedback } from "./src/types";
 
@@ -666,6 +667,29 @@ async function startServer() {
 
     console.error("Request parsing error:", error);
     return res.status(500).json({ error: "Failed to parse the incoming request." });
+  });
+
+  app.post("/__pdf", async (req, res) => {
+    const { html, fileName } = req.body ?? {};
+    if (typeof html !== "string" || !html.trim()) {
+      return res.status(400).json({ error: "HTML payload is required for PDF generation." });
+    }
+
+    try {
+      const pdfBuffer = await generatePdf(html);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${typeof fileName === "string" && fileName.trim() ? fileName : "webbook"}.pdf"`,
+      );
+      return res.end(pdfBuffer);
+    } catch (error: any) {
+      console.error("PDF generation failed:", error);
+      return res.status(500).json({
+        error: "PDF generation failed",
+        details: error?.message || "Unknown PDF generation error",
+      });
+    }
   });
 
   // API Routes for evolution

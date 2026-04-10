@@ -127,6 +127,7 @@ export function WebBookViewer({
   return (
     <div className="web-book-container w-full max-w-[900px] space-y-8 overflow-x-hidden print:max-w-none print:space-y-0 print:block print:overflow-visible" id="top">
       <section
+        data-export-ignore="true"
         data-html2canvas-ignore="true"
         className="print:hidden rounded-[28px] border border-[#d7cbbb] bg-[linear-gradient(180deg,#fffef9_0%,#f3eadc_100%)] p-6 shadow-[0_18px_46px_-34px_rgba(44,31,17,0.42)]"
       >

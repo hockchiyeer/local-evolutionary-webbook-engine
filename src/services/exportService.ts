@@ -17,6 +17,8 @@ type PdfLinkAnnotation = {
 const PDF_EXPORT_PAGE_WIDTH = 794;
 const PDF_EXPORT_PAGE_HEIGHT = 1123;
 const PDF_IMAGE_MAX_DIMENSION = 1600;
+const EXPORT_IGNORED_SELECTOR = '[data-export-ignore="true"]';
+const EXPORT_UI_IGNORED_SELECTOR = `button, .print\\:hidden, [data-html2canvas-ignore], ${EXPORT_IGNORED_SELECTOR}`;
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -40,9 +42,28 @@ function getWebBookElement(): HTMLElement {
   return element;
 }
 
+function createExportClone(element: HTMLElement = getWebBookElement()): HTMLElement {
+  const clone = element.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll(EXPORT_IGNORED_SELECTOR).forEach((node) => node.remove());
+  return clone;
+}
+
 function formatSourceLink(source: string | { title?: string | null; url: string }): string {
   if (typeof source === 'string') return source;
   return source.title ? `${source.title} - ${source.url}` : source.url;
+}
+
+function getExportFileName(topic: string, extension: string): string {
+  return `${topic.replace(/\s+/g, '_')}.${extension}`;
+}
+
+function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 async function inlineImagesForExport(
@@ -122,7 +143,8 @@ function createHiddenExportClone(element: HTMLElement): { clone: HTMLElement; cl
     background: 'white',
   });
 
-  const clone = element.cloneNode(true) as HTMLElement;
+  const clone = createExportClone(element);
+  clone.querySelectorAll(EXPORT_UI_IGNORED_SELECTOR).forEach((node) => node.remove());
   clone.style.width = `${PDF_EXPORT_PAGE_WIDTH}px`;
   clone.style.maxWidth = `${PDF_EXPORT_PAGE_WIDTH}px`;
   clone.style.margin = '0';
@@ -277,16 +299,11 @@ export async function exportWebBookToTxt(webBook: WebBook): Promise<void> {
   });
 
   const blob = new Blob(['\ufeff', text], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = `${webBook.topic.replace(/\s+/g, '_')}.txt`;
-  anchor.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(blob, getExportFileName(webBook.topic, 'txt'));
 }
 
 export async function exportWebBookToHtml(webBook: WebBook): Promise<void> {
-  const htmlContent = getWebBookElement().outerHTML;
+  const htmlContent = createExportClone().outerHTML;
 
   const fullHtml = `
     <!DOCTYPE html>
@@ -320,19 +337,13 @@ export async function exportWebBookToHtml(webBook: WebBook): Promise<void> {
   `;
 
   const blob = new Blob(['\ufeff', fullHtml], { type: 'text/html;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = `${webBook.topic.replace(/\s+/g, '_')}.html`;
-  anchor.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(blob, getExportFileName(webBook.topic, 'html'));
 }
 
 export async function exportWebBookToWord(webBook: WebBook): Promise<void> {
-  const element = getWebBookElement();
-  const clone = element.cloneNode(true) as HTMLElement;
+  const clone = createExportClone();
 
-  clone.querySelectorAll('button, .print\\:hidden, [data-html2canvas-ignore]').forEach((node) => node.remove());
+  clone.querySelectorAll(EXPORT_UI_IGNORED_SELECTOR).forEach((node) => node.remove());
 
   const images = clone.querySelectorAll('img');
   for (const image of Array.from(images)) {
@@ -415,15 +426,101 @@ export async function exportWebBookToWord(webBook: WebBook): Promise<void> {
     type: 'application/msword',
   });
 
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = `${webBook.topic.replace(/\s+/g, '_')}.doc`;
-  anchor.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(blob, getExportFileName(webBook.topic, 'doc'));
 }
 
-export async function exportWebBookToPdf(webBook: WebBook): Promise<void> {
+async function exportWebBookToPdfViaPuppeteer(webBook: WebBook): Promise<void> {
+  const clone = createExportClone();
+
+  clone.querySelectorAll(EXPORT_UI_IGNORED_SELECTOR).forEach((node) => node.remove());
+
+  const htmlContent = clone.outerHTML;
+  const fileName = getExportFileName(webBook.topic, 'pdf');
+  const fullHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8" />
+      <title>${webBook.topic}</title>
+      <script src="https://cdn.tailwindcss.com"></script>
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;700&family=Playfair+Display&family=JetBrains+Mono&display=swap" rel="stylesheet">
+      <style>
+        body {
+          font-family: 'Inter', sans-serif;
+          margin: 0;
+          padding: 0;
+          background: white;
+        }
+
+        * {
+          box-sizing: border-box;
+          overflow-wrap: break-word;
+        }
+
+        .web-book-container {
+          width: 100%;
+          max-width: none;
+          margin: 0;
+          padding: 0;
+        }
+
+        .web-book-page {
+          break-after: page;
+          page-break-after: always;
+          padding: 24mm;
+        }
+
+        .web-book-page:last-child {
+          break-after: auto;
+          page-break-after: auto;
+        }
+
+        h1, h2, h3, h4 {
+          break-after: avoid;
+        }
+
+        p, li {
+          break-inside: avoid;
+        }
+
+        img {
+          max-width: 100%;
+          break-inside: avoid;
+        }
+
+        @page {
+          size: A4;
+          margin: 0;
+        }
+      </style>
+    </head>
+    <body>
+      ${htmlContent}
+    </body>
+    </html>
+  `;
+
+  const response = await fetch('/__pdf', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      html: fullHtml,
+      fileName: fileName.replace(/\.pdf$/i, ''),
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(errorText ? `PDF export failed (${response.status}): ${errorText}` : `PDF export failed (${response.status})`);
+  }
+
+  const blob = await response.blob();
+  downloadBlob(blob, fileName);
+}
+
+async function exportWebBookToPdfLegacy(webBook: WebBook): Promise<void> {
   const element = getWebBookElement();
   await wait(150);
 
@@ -508,17 +605,30 @@ export async function exportWebBookToPdf(webBook: WebBook): Promise<void> {
       await wait(0);
     }
 
-    pdf.save(`${webBook.topic.replace(/\s+/g, '_')}.pdf`);
-  } catch (error) {
-    console.error('PDF Export failed:', error);
-    alert("High-res PDF export still hit a browser limit before finishing. The exporter now renders one page at a time, but very large books or blocked remote images can still fail. Please use 'Print / Save as PDF' as the fallback if needed.");
+    pdf.save(getExportFileName(webBook.topic, 'pdf'));
   } finally {
     cleanup?.();
   }
 }
 
+export async function exportWebBookToPdf(webBook: WebBook): Promise<void> {
+  try {
+    await exportWebBookToPdfViaPuppeteer(webBook);
+    return;
+  } catch (error) {
+    console.warn('Puppeteer PDF export failed, falling back to legacy browser export:', error);
+  }
+
+  try {
+    await exportWebBookToPdfLegacy(webBook);
+  } catch (error) {
+    console.error('PDF Export failed:', error);
+    alert("High-res PDF export still hit a browser limit before finishing. The exporter now renders one page at a time, but very large books or blocked remote images can still fail. Please use 'Print / Save as PDF' as the fallback if needed.");
+  }
+}
+
 export async function printWebBook(webBook: WebBook): Promise<void> {
-  const htmlContent = getWebBookElement().outerHTML;
+  const htmlContent = createExportClone().outerHTML;
   const printWindow = window.open('', '_blank');
   if (!printWindow) {
     alert('Please allow popups to use the print feature.');
