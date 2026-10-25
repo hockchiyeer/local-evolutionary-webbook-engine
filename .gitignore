@@ -1,31 +1,71 @@
+# Node.js dependencies
 node_modules/*
 !node_modules/.gitignore
+
+# Generated build output
 build/*
 !build/.gitignore
+
+# Distribution files
 dist/*
 !dist/.gitignore
+
+# Test coverage reports and generated data
 coverage/*
 !coverage/.gitignore
+
 data/*
 !data/.gitignore
+
+# Python bytecode cache directories
 __pycache__/*
 !__pycache__/.gitignore
+
 engine/__pycache__/*
 !engine/__pycache__/.gitignore
+
+# Python test cache directories
 tests/__pycache__/*
 !tests/__pycache__/.gitignore
+
 tests/integration/__pycache__/*
 !tests/integration/__pycache__/.gitignore
+
 tests/unit/__pycache__/*
 !tests/unit/__pycache__/.gitignore
+
 tests/smoke/__pycache__/*
 !tests/smoke/__pycache__/.gitignore
+
+# Python compiled files
 *.py[cod]
+
+# Python testing, type-checking, and linting caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Python test coverage data
 .coverage
+
+# macOS system metadata
 .DS_Store
+
+# Log files
 *.log
+
+# Environment configuration files
+# Keep the example template under version control
 .env*
 !.env.example
+
+# AI Studio internal runtime artifacts and temporary storage
+.aistudio/
+.tempmediaStorage/
+
+# Generated build and packaging archives
+artifacts/
+
+# AI Studio runtime prompt uploads and attachments
+public/assets/aistudio/
+

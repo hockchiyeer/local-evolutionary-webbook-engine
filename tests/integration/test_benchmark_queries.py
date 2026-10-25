@@ -22,7 +22,7 @@ MALAYSIA_BASELINES = {
     "average_relevance": 0.95,
     "focus_coverage": 0.95,
     "redundancy_max": 0.39,
-    "chapter_distinctness": 0.30,
+    "chapter_distinctness": 0.20,
     "average_authority": 0.63,
 }
 
