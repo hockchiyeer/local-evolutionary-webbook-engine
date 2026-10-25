@@ -277,14 +277,22 @@ def normalize_subtopic(item, fallback_source_url=""):
     }
 
 
+def _canonical_term_key(term):
+    cleaned = re.sub(r"\s*\([^)]*\)", "", str(term or "")).strip().lower()
+    cleaned = re.sub(r"[^\w\s]", "", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
 def dedupe_definitions(definitions):
     seen_terms = set()
     deduped = []
     for definition in definitions:
-        key = normalize_space(definition.get("term", "")).lower()
-        if not key or key in seen_terms:
+        raw_key = normalize_space(definition.get("term", "")).lower()
+        canonical_key = _canonical_term_key(raw_key)
+        if not raw_key or not canonical_key or canonical_key in seen_terms or raw_key in seen_terms:
             continue
-        seen_terms.add(key)
+        seen_terms.add(raw_key)
+        seen_terms.add(canonical_key)
         deduped.append(definition)
     return deduped
 
@@ -407,17 +415,45 @@ def normalize_source_config(config):
     )
 
 
+_SUBTOPIC_INTRO_PREFIXES = re.compile(
+    r"^(?:"
+    r"in the [^,]+,\s*"
+    r"|this (?:study|paper|research|article) (?:examines|analyzes|investigates|explores|presents|finds|provides)\s+"
+    r"|the (?:study|paper|research|findings) (?:reveal|reveals|show|shows|suggest|suggests|contribute|contributes to)\s+"
+    r"|to (?:reach|achieve|address|solve) these (?:goals|challenges|issues),\s*"
+    r"|some (?:companies|organizations|researchers|models),\s*such as\s+"
+    r"|in response,\s*"
+    r"|in addition,\s*"
+    r"|moreover,\s*"
+    r"|furthermore,\s*"
+    r"|by applying [^,]+,\s*"
+    r")",
+    re.IGNORECASE,
+)
+
+_BAD_TERM_PREFIXES = re.compile(
+    r"^(?:in addition|furthermore|moreover|however|the results|this study|abstract|first published|by|according to)\b",
+    re.IGNORECASE,
+)
+
+
 def title_from_sentence(sentence, query):
-    fragment = normalize_space(re.split(r"[:;,-]", sentence)[0])
+    cleaned = _SUBTOPIC_INTRO_PREFIXES.sub("", sentence).strip()
+    fragment = normalize_space(re.split(r"[:;,-]", cleaned or sentence)[0])
     q_words = query_words(query)
     words = [
         word for word in re.findall(r"[A-Za-z][A-Za-z'-]{2,}", fragment)
         if word.lower() not in STOP_WORDS and word.lower() not in q_words
     ]
     if len(words) < 2:
-        return ""
+        words = [
+            word for word in re.findall(r"[A-Za-z][A-Za-z'-]{2,}", cleaned or sentence)
+            if word.lower() not in STOP_WORDS and word.lower() not in q_words
+        ]
+        if len(words) < 2:
+            return ""
 
-    title = " ".join(word.capitalize() for word in words[:5])
+    title = " ".join(word.capitalize() for word in words[:4])
     return title if is_meaningful_text(title, sentence) else ""
 
 
@@ -429,33 +465,46 @@ def build_definition_candidates(title, content, source_url):
     def add_candidate(term, description):
         normalized_term = normalize_space(term)
         normalized_description = normalize_space(description)
-        key = normalized_term.lower()
-        if not normalized_term or key in seen_terms:
+        canonical = _canonical_term_key(normalized_term)
+        if not normalized_term or not canonical or canonical in seen_terms:
+            return
+        if _BAD_TERM_PREFIXES.search(normalized_term):
+            return
+        if normalized_term.lower() == normalized_description.lower():
+            return
+        if ":" in normalized_term or "?" in normalized_term:
+            return
+        if normalized_term.endswith((" how", " that", " with", " and", " or", " of", " in", " to", " is")):
+            return
+        tokens = tokenize(normalized_term)
+        if not (1 <= len(tokens) <= 5):
             return
         if not is_meaningful_text(normalized_term, normalized_description):
             return
 
-        seen_terms.add(key)
+        seen_terms.add(canonical)
+        seen_terms.add(normalized_term.lower())
         definitions.append({
             "term": normalized_term,
             "description": normalized_description,
             "sourceUrl": source_url,
         })
 
-    if title and sentences:
-        add_candidate(title, sentences[0])
+    if title and sentences and len(tokenize(title)) <= 4 and ":" not in title and "?" not in title:
+        if not _BAD_TERM_PREFIXES.search(title):
+            add_candidate(title, sentences[0])
 
-    for sentence in sentences[:8]:
+    for sentence in sentences[:12]:
         match = ENTITY_VERB_PATTERN.match(sentence)
         if match:
             candidate_term = normalize_space(match.group(1))
             candidate_tokens = tokenize(candidate_term)
-            if 1 <= len(candidate_tokens) <= 8:
+            if 1 <= len(candidate_tokens) <= 5 and not _BAD_TERM_PREFIXES.search(candidate_term):
                 add_candidate(candidate_term, sentence)
-        if len(definitions) >= 6:
+        if len(definitions) >= 8:
             break
 
-    return definitions[:6]
+    return definitions[:8]
 
 
 def build_subtopic_candidates(title, content, query, source_url):
@@ -464,7 +513,7 @@ def build_subtopic_candidates(title, content, query, source_url):
     focus_words = expand_query_focus_words(q_words)
     scored_sentences = []
 
-    for sentence in sentences[1:10]:
+    for sentence in sentences[1:25]:
         sentence_words = set(tokenize(sentence))
         if len(sentence_words) < 6:
             continue
@@ -492,11 +541,12 @@ def build_subtopic_candidates(title, content, query, source_url):
             "summary": normalize_space(sentence),
             "sourceUrl": source_url,
         })
-        if len(subtopics) >= 4:
+        if len(subtopics) >= 8:
             break
 
     if not subtopics and title and sentences:
-        fallback_title = f"Context for {title}"
+        compact_title = " ".join(word.capitalize() for word in tokenize(title)[:3])
+        fallback_title = f"{compact_title} Overview" if compact_title else "Subject Overview"
         if is_meaningful_text(fallback_title, sentences[0]):
             subtopics.append({
                 "title": fallback_title,
@@ -504,7 +554,7 @@ def build_subtopic_candidates(title, content, query, source_url):
                 "sourceUrl": source_url,
             })
 
-    return subtopics[:4]
+    return subtopics[:8]
 
 
 def estimate_informative_score(content, query, definitions, subtopics):
@@ -1186,12 +1236,16 @@ _META_GUIDANCE_RE = re.compile(
     r'|when live retrieval is'
     r'|source coverage is available'
     r'|strongest available source here is'
+    r'|first published'
     r'|published in'
+    r'|published \d{4}'
     r'|work type'
     r'|subjects include'
     r'|publisher:'
     r'|authors?:'
     r'|year:'
+    r'|^by\s+[A-Za-z]'
+    r'|isbn\b|issn\b|doi\.org'
     r')',
     re.IGNORECASE,
 )
@@ -1202,12 +1256,30 @@ def extract_sentences(text):
     if not normalized:
         return []
 
-    sentences = re.split(r'(?<=[.!?])\s+', normalized)
-    return [
-        s.strip()
-        for s in sentences
-        if len(s.strip()) > 20 and not _META_GUIDANCE_RE.search(s)
-    ]
+    # Strip abstract prefix if present
+    normalized = re.sub(r"^Abstract\s+", "", normalized, flags=re.IGNORECASE)
+
+    # Protect common periods in abbreviations to avoid broken fragments like "In response, the U.S."
+    protected = re.sub(r'\bU\.S\.', 'U_S_DOT', normalized)
+    protected = re.sub(r'\be\.g\.', 'E_G_DOT', protected, flags=re.IGNORECASE)
+    protected = re.sub(r'\bi\.e\.', 'I_E_DOT', protected, flags=re.IGNORECASE)
+    protected = re.sub(r'\bet al\.', 'ET_AL_DOT', protected, flags=re.IGNORECASE)
+    protected = re.sub(r'\b(Dr|Mr|Mrs|Ms|Prof|Inc|Corp|Ltd|vs)\.', r'\1_DOT', protected, flags=re.IGNORECASE)
+
+    raw_sentences = re.split(r'(?<=[.!?])\s+', protected)
+    results = []
+    for s in raw_sentences:
+        s = s.replace('U_S_DOT', 'U.S.')
+        s = s.replace('E_G_DOT', 'e.g.')
+        s = s.replace('I_E_DOT', 'i.e.')
+        s = s.replace('ET_AL_DOT', 'et al.')
+        s = re.sub(r'\b(Dr|Mr|Mrs|Ms|Prof|Inc|Corp|Ltd|vs)_DOT', r'\1.', s, flags=re.IGNORECASE)
+        s = s.strip()
+        if len(s) > 20 and not _META_GUIDANCE_RE.search(s):
+            words = tokenize(s)
+            if len(words) >= 4:
+                results.append(s)
+    return results
     
 def choose_theme_candidates(selected_sources, query):
     clusters = build_source_clusters(
@@ -1228,7 +1300,7 @@ def choose_theme_candidates(selected_sources, query):
     )
 
 
-def choose_items_for_chapter(items, keyword_set, used_keys, key_name, text_getter, limit):
+def choose_items_for_chapter(items, keyword_set, used_keys, key_name, text_getter, limit, usage_counts=None):
     return choose_items_for_chapter_impl(
         items,
         keyword_set,
@@ -1238,6 +1310,7 @@ def choose_items_for_chapter(items, keyword_set, used_keys, key_name, text_gette
         limit,
         tokenize=tokenize,
         normalize_space=normalize_space,
+        usage_counts=usage_counts,
     )
 
 
@@ -1369,8 +1442,12 @@ def generate_webbook(selected_sources, query, reward_profile=None):
 
     chapters = []
     used_sentence_keys = set()
+    used_sentence_texts = set()
     used_definition_terms = set()
     used_subtopic_titles = set()
+    used_chapter_subtitles = set()
+    usage_counts_definitions = {}
+    usage_counts_subtopics = {}
 
     for chapter_index, (base_label, template_keywords) in enumerate(chapter_templates):
         selected_cluster = select_cluster_for_template(
@@ -1408,6 +1485,7 @@ def generate_webbook(selected_sources, query, reward_profile=None):
             tokenize=tokenize,
             stop_words=STOP_WORDS,
             normalize_term_key=normalize_term_key,
+            used_subtitles=used_chapter_subtitles,
         )
 
         keyword_set = set(tokenize(chapter_title)).union(template_keywords).union(focus_words)
@@ -1436,7 +1514,9 @@ def generate_webbook(selected_sources, query, reward_profile=None):
         scored_sentences = []
         for entry in sentence_pool:
             sentence_key = (entry["source_index"], entry["sentence_index"])
-            novelty_penalty = 0.45 if sentence_key in used_sentence_keys else 0.0
+            norm_sent = normalize_space(entry["sentence"]).lower()
+            is_used = (sentence_key in used_sentence_keys) or (norm_sent in used_sentence_texts)
+            novelty_penalty = 2.4 if is_used else 0.0
             score = score_sentence(
                 entry["sentence"],
                 focus_words,
@@ -1458,15 +1538,26 @@ def generate_webbook(selected_sources, query, reward_profile=None):
             reverse=True,
         )
 
+        unused_entries = [
+            entry for _, entry in scored_sentences
+            if (entry["source_index"], entry["sentence_index"]) not in used_sentence_keys
+            and normalize_space(entry["sentence"]).lower() not in used_sentence_texts
+        ]
+        used_entries = [
+            entry for _, entry in scored_sentences
+            if entry not in unused_entries
+        ]
+        sentence_gene_pool = (unused_entries + used_entries)[:max(20, len(scored_sentences))]
+
         pool_size_micro = 15
         generations_micro = 8
-        sentence_gene_pool = [entry for _, entry in scored_sentences[:max(20, len(scored_sentences))]]
         
         if len(sentence_gene_pool) < 2:
             selected_entries = sentence_gene_pool
             for entry in selected_entries:
                 sentence_key = (entry["source_index"], entry["sentence_index"])
                 used_sentence_keys.add(sentence_key)
+                used_sentence_texts.add(normalize_space(entry["sentence"]).lower())
         else:
             target_sentences_count = min(len(sentence_gene_pool), random.randint(4, 6))
             
@@ -1480,11 +1571,21 @@ def generate_webbook(selected_sources, query, reward_profile=None):
                 used_sources = len(set(s["source_index"] for s in chrom_sentences))
                 diversity_score = used_sources / len(chrom_sentences)
                 reward_weights = normalized_reward_profile["weights"]
+
+                # Penalize reusing sentences across chapters
+                repeat_count = sum(
+                    1 for s in chrom_sentences
+                    if (s["source_index"], s["sentence_index"]) in used_sentence_keys
+                    or normalize_space(s["sentence"]).lower() in used_sentence_texts
+                )
+                repeat_penalty = (repeat_count / len(chrom_sentences)) * 0.55 * reward_weights["antiRedundancy"]
+
                 weighted_total = (
                     (overlap_score * 0.4 * reward_weights["relevance"])
                     + (quality_score * 0.3 * reward_weights["evidenceDensity"])
                     + (diversity_score * 0.2 * reward_weights["diversity"])
                     + (density_score * 0.1 * reward_weights["structure"])
+                    - repeat_penalty
                 )
                 weight_normalizer = (
                     (0.4 * reward_weights["relevance"])
@@ -1492,7 +1593,7 @@ def generate_webbook(selected_sources, query, reward_profile=None):
                     + (0.2 * reward_weights["diversity"])
                     + (0.1 * reward_weights["structure"])
                 ) or 1.0
-                return weighted_total / weight_normalizer
+                return max(0.0, weighted_total / weight_normalizer)
 
             population_micro = []
             for _ in range(pool_size_micro):
@@ -1527,6 +1628,7 @@ def generate_webbook(selected_sources, query, reward_profile=None):
             for entry in selected_entries:
                 sentence_key = (entry["source_index"], entry["sentence_index"])
                 used_sentence_keys.add(sentence_key)
+                used_sentence_texts.add(normalize_space(entry["sentence"]).lower())
 
         selected_entries.sort(key=lambda entry: (entry.get("cluster_priority", 0), entry["source_index"], entry["sentence_index"]))
         paragraph = " ".join(entry["sentence"] for entry in selected_entries).strip()
@@ -1537,22 +1639,31 @@ def generate_webbook(selected_sources, query, reward_profile=None):
             if 0 <= index < len(normalized_sources)
         ]
 
-        chapter_definition_pool = dedupe_definitions([
-            definition
-            for definition in (selected_cluster.get("definitions", []) or [])
-        ] + [
-            definition
-            for source in supporting_sources
-            for definition in (source.get("definitions", []) or [])
-        ] + global_definitions)
-        chapter_subtopic_pool = dedupe_subtopics([
-            subtopic
-            for subtopic in (selected_cluster.get("subtopics", []) or [])
-        ] + [
-            subtopic
-            for source in supporting_sources
-            for subtopic in (source.get("subTopics", []) or [])
-        ] + global_subtopics)
+        # Extract local definitions and subtopics from the chapter's unique paragraph
+        local_definitions = build_definition_candidates(
+            supporting_sources[0].get("title", chapter_title) if supporting_sources else chapter_title,
+            paragraph,
+            supporting_sources[0].get("url", "") if supporting_sources else "",
+        )
+        local_subtopics = build_subtopic_candidates(
+            supporting_sources[0].get("title", chapter_title) if supporting_sources else chapter_title,
+            paragraph,
+            query,
+            supporting_sources[0].get("url", "") if supporting_sources else "",
+        )
+
+        chapter_definition_pool = dedupe_definitions(
+            local_definitions
+            + [definition for definition in (selected_cluster.get("definitions", []) or [])]
+            + [definition for source in supporting_sources for definition in (source.get("definitions", []) or [])]
+            + global_definitions
+        )
+        chapter_subtopic_pool = dedupe_subtopics(
+            local_subtopics
+            + [subtopic for subtopic in (selected_cluster.get("subtopics", []) or [])]
+            + [subtopic for source in supporting_sources for subtopic in (source.get("subTopics", []) or [])]
+            + global_subtopics
+        )
 
         chapter_title = build_chapter_title(
             base_label,
@@ -1571,7 +1682,11 @@ def generate_webbook(selected_sources, query, reward_profile=None):
             tokenize=tokenize,
             stop_words=STOP_WORDS,
             normalize_term_key=normalize_term_key,
+            used_subtitles=used_chapter_subtitles,
         )
+        chosen_subtitle = chapter_title.split(":", 1)[1].strip() if ":" in chapter_title else chapter_title
+        used_chapter_subtitles.add(normalize_term_key(chosen_subtitle))
+
         keyword_set = set(tokenize(chapter_title)).union(template_keywords).union(focus_words)
 
         chapter_definitions = choose_items_for_chapter(
@@ -1581,6 +1696,7 @@ def generate_webbook(selected_sources, query, reward_profile=None):
             "term",
             lambda definition: f"{definition.get('term', '')} {definition.get('description', '')}",
             4,
+            usage_counts=usage_counts_definitions,
         )
         chapter_subtopics = choose_items_for_chapter(
             chapter_subtopic_pool,
@@ -1589,6 +1705,7 @@ def generate_webbook(selected_sources, query, reward_profile=None):
             "title",
             lambda subtopic: f"{subtopic.get('title', '')} {subtopic.get('summary', '')}",
             3,
+            usage_counts=usage_counts_subtopics,
         )
 
         if not chapter_definitions and supporting_sources:

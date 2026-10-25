@@ -1,4 +1,4 @@
-import html2canvas from 'html2canvas';
+import html2canvas from 'html2canvas-pro';
 import { jsPDF } from 'jspdf';
 import type { WebBook } from '../types';
 import { buildWebBookDocx, type DocxChapterImageAsset } from './docxExport';
@@ -61,10 +61,13 @@ function getExportFileName(topic: string, extension: string): string {
 function downloadBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
+  anchor.style.display = 'none';
   anchor.href = url;
   anchor.download = fileName;
+  document.body.appendChild(anchor);
   anchor.click();
-  URL.revokeObjectURL(url);
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
 function parseDataUrlImage(src: string): DocxChapterImageAsset | null {
@@ -190,10 +193,11 @@ function createHiddenExportClone(element: HTMLElement): { clone: HTMLElement; cl
   wrapper.setAttribute('aria-hidden', 'true');
   Object.assign(wrapper.style, {
     position: 'fixed',
-    left: '-20000px',
+    left: '0',
     top: '0',
     width: `${PDF_EXPORT_PAGE_WIDTH}px`,
-    zIndex: '-1',
+    zIndex: '-9999',
+    opacity: '0',
     pointerEvents: 'none',
     background: 'white',
   });
@@ -282,51 +286,97 @@ function prepareWordFooterForExport(root: HTMLElement): void {
 }
 
 function collectPdfLinkAnnotations(root: HTMLElement): PdfLinkAnnotation[] {
-  const internalLinks = Array.from(root.querySelectorAll<HTMLElement>('[data-pdf-target-page]'));
-  const externalLinks = Array.from(root.querySelectorAll<HTMLAnchorElement>('a[href]'))
-    .filter((anchor) => /^https?:\/\//i.test(anchor.href));
+  const annotations: PdfLinkAnnotation[] = [];
+  const processedElements = new Set<HTMLElement>();
+  const candidates = Array.from(root.querySelectorAll<HTMLElement>('[data-pdf-target-page], a[href]'));
 
-  return [...internalLinks, ...externalLinks]
-    .map((element) => {
-      const sourcePage = element.closest<HTMLElement>('[data-pdf-page-number]');
-      const sourcePageNumber = Number(sourcePage?.dataset.pdfPageNumber);
+  for (const element of candidates) {
+    if (processedElements.has(element)) continue;
 
-      if (!sourcePage || !Number.isFinite(sourcePageNumber)) {
-        return null;
+    const sourcePage = element.closest<HTMLElement>('[data-pdf-page-number]');
+    const sourcePageNumber = Number(sourcePage?.dataset.pdfPageNumber);
+
+    if (!sourcePage || !Number.isFinite(sourcePageNumber)) {
+      continue;
+    }
+
+    const sourceRect = sourcePage.getBoundingClientRect();
+    const elementRect = element.getBoundingClientRect();
+    if (!sourceRect.width || !sourceRect.height || !elementRect.width || !elementRect.height) {
+      continue;
+    }
+
+    const baseAnnotation = {
+      sourcePageNumber,
+      xRatio: (elementRect.left - sourceRect.left) / sourceRect.width,
+      yRatio: (elementRect.top - sourceRect.top) / sourceRect.height,
+      widthRatio: elementRect.width / sourceRect.width,
+      heightRatio: elementRect.height / sourceRect.height,
+    };
+
+    if (element instanceof HTMLAnchorElement) {
+      const hrefAttr = element.getAttribute('href') || '';
+
+      if (hrefAttr.startsWith('#')) {
+        processedElements.add(element);
+
+        let targetPageNumber: number | null = null;
+        if (element.dataset.pdfTargetPage) {
+          const parsed = Number(element.dataset.pdfTargetPage);
+          if (Number.isFinite(parsed) && parsed >= 1) {
+            targetPageNumber = parsed;
+          }
+        }
+
+        if (targetPageNumber === null) {
+          if (hrefAttr === '#top' || hrefAttr === '#' || hrefAttr === '#cover' || hrefAttr === '#page-1') {
+            targetPageNumber = 1;
+          } else {
+            try {
+              const targetElem = root.querySelector<HTMLElement>(hrefAttr);
+              if (targetElem) {
+                const targetPage = targetElem.closest<HTMLElement>('[data-pdf-page-number]');
+                const parsed = Number(targetPage?.dataset.pdfPageNumber);
+                if (Number.isFinite(parsed) && parsed >= 1) {
+                  targetPageNumber = parsed;
+                }
+              }
+            } catch {
+              // Ignore invalid selector syntax in href
+            }
+          }
+        }
+
+        if (targetPageNumber !== null) {
+          annotations.push({
+            ...baseAnnotation,
+            targetPageNumber,
+          });
+        }
+        continue;
       }
 
-      const sourceRect = sourcePage.getBoundingClientRect();
-      const elementRect = element.getBoundingClientRect();
-      if (!sourceRect.width || !sourceRect.height || !elementRect.width || !elementRect.height) {
-        return null;
-      }
-
-      const baseAnnotation = {
-        sourcePageNumber,
-        xRatio: (elementRect.left - sourceRect.left) / sourceRect.width,
-        yRatio: (elementRect.top - sourceRect.top) / sourceRect.height,
-        widthRatio: elementRect.width / sourceRect.width,
-        heightRatio: elementRect.height / sourceRect.height,
-      };
-
-      if (element instanceof HTMLAnchorElement && /^https?:\/\//i.test(element.href)) {
-        return {
+      if (/^https?:\/\//i.test(element.href)) {
+        processedElements.add(element);
+        annotations.push({
           ...baseAnnotation,
           externalUrl: element.href,
-        };
+        });
+        continue;
       }
-
+    } else if (element.dataset.pdfTargetPage) {
+      processedElements.add(element);
       const targetPageNumber = Number(element.dataset.pdfTargetPage);
-      if (!Number.isFinite(targetPageNumber)) {
-        return null;
+      if (Number.isFinite(targetPageNumber) && targetPageNumber >= 1) {
+        annotations.push({
+          ...baseAnnotation,
+          targetPageNumber,
+        });
       }
+    }
+  }
 
-      return {
-        ...baseAnnotation,
-        targetPageNumber,
-      };
-    })
-    .filter((annotation): annotation is PdfLinkAnnotation => Boolean(annotation));
+  return annotations;
 }
 
 export async function exportWebBookToTxt(webBook: WebBook): Promise<void> {
@@ -413,97 +463,7 @@ export async function exportWebBookToWord(webBook: WebBook): Promise<void> {
   downloadBlob(blob, getExportFileName(webBook.topic, 'docx'));
 }
 
-async function exportWebBookToPdfViaPuppeteer(webBook: WebBook): Promise<void> {
-  const clone = createExportClone();
-
-  clone.querySelectorAll(EXPORT_UI_IGNORED_SELECTOR).forEach((node) => node.remove());
-
-  const htmlContent = clone.outerHTML;
-  const fileName = getExportFileName(webBook.topic, 'pdf');
-  const fullHtml = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8" />
-      <title>${webBook.topic}</title>
-      <script src="https://cdn.tailwindcss.com"></script>
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;700&family=Playfair+Display&family=JetBrains+Mono&display=swap" rel="stylesheet">
-      <style>
-        body {
-          font-family: 'Inter', sans-serif;
-          margin: 0;
-          padding: 0;
-          background: white;
-        }
-
-        * {
-          box-sizing: border-box;
-          overflow-wrap: break-word;
-        }
-
-        .web-book-container {
-          width: 100%;
-          max-width: none;
-          margin: 0;
-          padding: 0;
-        }
-
-        .web-book-page {
-          break-after: page;
-          page-break-after: always;
-        }
-
-        .web-book-page:last-child {
-          break-after: auto;
-          page-break-after: auto;
-        }
-
-        h1, h2, h3, h4 {
-          break-after: avoid;
-        }
-
-        p, li {
-          break-inside: avoid;
-        }
-
-        img {
-          max-width: 100%;
-          break-inside: avoid;
-        }
-
-        @page {
-          size: A4;
-          margin: 0;
-        }
-      </style>
-    </head>
-    <body>
-      ${htmlContent}
-    </body>
-    </html>
-  `;
-
-  const response = await fetch('/__pdf', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      html: fullHtml,
-      fileName: fileName.replace(/\.pdf$/i, ''),
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(errorText ? `PDF export failed (${response.status}): ${errorText}` : `PDF export failed (${response.status})`);
-  }
-
-  const blob = await response.blob();
-  downloadBlob(blob, fileName);
-}
-
-async function exportWebBookToPdfLegacy(webBook: WebBook): Promise<void> {
+async function exportWebBookToPdfDirect(webBook: WebBook): Promise<void> {
   const element = getWebBookElement();
   await wait(150);
 
@@ -588,7 +548,8 @@ async function exportWebBookToPdfLegacy(webBook: WebBook): Promise<void> {
       await wait(0);
     }
 
-    pdf.save(getExportFileName(webBook.topic, 'pdf'));
+    const pdfBlob = pdf.output('blob');
+    downloadBlob(pdfBlob, getExportFileName(webBook.topic, 'pdf'));
   } finally {
     cleanup?.();
   }
@@ -596,29 +557,16 @@ async function exportWebBookToPdfLegacy(webBook: WebBook): Promise<void> {
 
 export async function exportWebBookToPdf(webBook: WebBook): Promise<void> {
   try {
-    await exportWebBookToPdfViaPuppeteer(webBook);
-    return;
+    await exportWebBookToPdfDirect(webBook);
   } catch (error) {
-    console.warn('Puppeteer PDF export failed, falling back to legacy browser export:', error);
-  }
-
-  try {
-    await exportWebBookToPdfLegacy(webBook);
-  } catch (error) {
-    console.error('PDF Export failed:', error);
-    alert("High-res PDF export still hit a browser limit before finishing. The exporter now renders one page at a time, but very large books or blocked remote images can still fail. Please use 'Print / Save as PDF' as the fallback if needed.");
+    console.warn('High-res PDF export encountered an issue, falling back to print/PDF engine:', error);
+    await printWebBook(webBook);
   }
 }
 
 export async function printWebBook(webBook: WebBook): Promise<void> {
   const htmlContent = createExportClone().outerHTML;
-  const printWindow = window.open('', '_blank');
-  if (!printWindow) {
-    alert('Please allow popups to use the print feature.');
-    return;
-  }
-
-  printWindow.document.write(`
+  const printDocContent = `
     <!DOCTYPE html>
     <html>
       <head>
@@ -661,11 +609,56 @@ export async function printWebBook(webBook: WebBook): Promise<void> {
           window.onload = () => {
             setTimeout(() => {
               window.print();
-            }, 1000);
+            }, 800);
           };
         </script>
       </body>
     </html>
-  `);
-  printWindow.document.close();
+  `;
+
+  let printWindow: Window | null = null;
+  try {
+    printWindow = window.open('', '_blank');
+  } catch {
+    printWindow = null;
+  }
+
+  if (printWindow) {
+    printWindow.document.write(printDocContent);
+    printWindow.document.close();
+    return;
+  }
+
+  // Fallback for sandboxed iframes where window.open popup is disallowed
+  const iframe = document.createElement('iframe');
+  Object.assign(iframe.style, {
+    position: 'fixed',
+    right: '0',
+    bottom: '0',
+    width: '0',
+    height: '0',
+    border: '0',
+    opacity: '0',
+    pointerEvents: 'none',
+  });
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentWindow?.document;
+  if (!doc) {
+    iframe.remove();
+    return;
+  }
+
+  doc.open();
+  doc.write(printDocContent);
+  doc.close();
+
+  iframe.contentWindow?.focus();
+  window.setTimeout(() => {
+    try {
+      iframe.contentWindow?.print();
+    } finally {
+      window.setTimeout(() => iframe.remove(), 60000);
+    }
+  }, 1000);
 }

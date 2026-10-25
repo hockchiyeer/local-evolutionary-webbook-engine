@@ -182,31 +182,7 @@ def _fallback_subtopic_tree(query: str, corpus: Sequence[str], max_topics: int) 
     candidates: List[dict[str, Any]] = []
     seen_labels = set()
 
-    for phrase in expand_semantic_phrases(query, max_depth=2, limit=max_topics * 3):
-        phrase_tokens = [token for token in _tokenize(phrase) if token not in query_tokens]
-        if not phrase_tokens:
-            continue
-        label = " ".join(token.capitalize() for token in phrase_tokens[:3]).strip()
-        label_key = label.lower()
-        if not label or label_key in seen_labels:
-            continue
-        seen_labels.add(label_key)
-        candidates.append(
-            {
-                "label": label,
-                "keywords": phrase_tokens[:5],
-                "branch": len(candidates) % max(1, min(max_topics, 3)),
-                "representativeText": phrase,
-                "score": round(0.55 + (min(len(phrase_tokens), 3) * 0.08), 6),
-                "divergence": round(
-                    1.0 - (len(set(phrase_tokens).intersection(query_tokens)) / max(len(set(phrase_tokens)), 1)),
-                    6,
-                ),
-            }
-        )
-        if len(candidates) >= max_topics:
-            return candidates
-
+    corpus_candidates: List[dict[str, Any]] = []
     for text in corpus:
         tokens = [token for token in _tokenize(text) if token not in query_tokens]
         if len(tokens) < 2:
@@ -225,21 +201,51 @@ def _fallback_subtopic_tree(query: str, corpus: Sequence[str], max_topics: int) 
         if not label or label_key in seen_labels:
             continue
         seen_labels.add(label_key)
-        candidates.append(
+        corpus_candidates.append(
             {
                 "label": label,
                 "keywords": label_tokens,
-                "branch": len(candidates) % max(1, min(max_topics, 3)),
+                "branch": len(corpus_candidates) % max(1, min(max_topics, 3)),
                 "representativeText": text,
-                "score": 0.45,
+                "score": 0.60,
                 "divergence": round(
                     1.0 - (len(set(label_tokens).intersection(query_tokens)) / max(len(set(label_tokens)), 1)),
                     6,
                 ),
             }
         )
+
+    graph_candidates: List[dict[str, Any]] = []
+    for phrase in expand_semantic_phrases(query, max_depth=2, limit=max_topics * 3):
+        phrase_tokens = [token for token in _tokenize(phrase) if token not in query_tokens]
+        if not phrase_tokens:
+            continue
+        label = " ".join(token.capitalize() for token in phrase_tokens[:3]).strip()
+        label_key = label.lower()
+        if not label or label_key in seen_labels:
+            continue
+        seen_labels.add(label_key)
+        graph_candidates.append(
+            {
+                "label": label,
+                "keywords": phrase_tokens[:5],
+                "branch": len(graph_candidates) % max(1, min(max_topics, 3)),
+                "representativeText": phrase,
+                "score": round(0.55 + (min(len(phrase_tokens), 3) * 0.08), 6),
+                "divergence": round(
+                    1.0 - (len(set(phrase_tokens).intersection(query_tokens)) / max(len(set(phrase_tokens)), 1)),
+                    6,
+                ),
+            }
+        )
+
+    while len(candidates) < max_topics and (corpus_candidates or graph_candidates):
+        if corpus_candidates:
+            candidates.append(corpus_candidates.pop(0))
         if len(candidates) >= max_topics:
             break
+        if graph_candidates:
+            candidates.append(graph_candidates.pop(0))
 
     return candidates[:max_topics]
 

@@ -166,6 +166,7 @@ def build_chapter_title(
     tokenize: Callable[[str], Sequence[str]],
     stop_words: Set[str],
     normalize_term_key: Callable[[str], str],
+    used_subtitles: Set[str] | None = None,
 ) -> str:
     query_key = normalize_term_key(query)
     base_key = normalize_term_key(base_label)
@@ -288,9 +289,11 @@ def build_chapter_title(
         overlap_score += semantic_bonus_by_key.get(semantic_candidate_key, 0.0)
         if semantic_focus_key and semantic_candidate_key == semantic_focus_key:
             overlap_score += 0.42
-        if token_set.issubset(focus_words) and len(token_set) <= 3:
+        if len(token_set) == 1 and token_set.issubset(focus_words):
             overlap_score -= 0.52
-        if query_overlap_ratio >= 0.75 and len(token_set) <= 3:
+        elif token_set.issubset(focus_words) and len(token_set) <= 2 and len(focus_words) <= 5:
+            overlap_score -= 0.35
+        if query_overlap_ratio >= 0.85 and len(token_set) <= 2 and len(focus_words) <= 5:
             overlap_score -= 0.24
 
         if compact_key == query_key:
@@ -301,7 +304,7 @@ def build_chapter_title(
             overlap_score -= 0.18
         if candidate.lower().startswith(base_label.lower()) and query_key:
             overlap_score -= 0.38
-        if query_overlap_ratio >= 0.34 and len(token_set) > 2:
+        if query_overlap_ratio >= 0.34 and len(token_set) > 2 and len(focus_words) <= 5:
             overlap_score -= 0.22
         if query_overlap_ratio >= 0.5 and len(token_set) > max(2, len(focus_words)):
             overlap_score -= 0.18
@@ -310,13 +313,17 @@ def build_chapter_title(
         if depth_info and depth_info.get("layer") == "tangential" and target_layer == "seed":
             overlap_score -= 0.10
 
+        if used_subtitles is not None and compact_key in used_subtitles:
+            overlap_score -= 1.8
+
         scored_candidates.append((overlap_score, compact))
 
     scored_candidates.sort(key=lambda item: item[0], reverse=True)
     for _, compact in scored_candidates:
-        if normalize_term_key(compact) == query_key:
+        c_key = normalize_term_key(compact)
+        if c_key == query_key or c_key == base_key:
             continue
-        if normalize_term_key(compact) == base_key:
+        if used_subtitles is not None and c_key in used_subtitles:
             continue
         return _trim_title(f"{base_label}: {compact}")
 

@@ -1,26 +1,5 @@
-import puppeteer from "puppeteer";
-
-export async function generatePdf(html: string): Promise<Buffer> {
-  const browser = await puppeteer.launch({
-    headless: "new",
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
-
-  try {
-    const page = await browser.newPage();
-
-    await page.setContent(html, {
-      waitUntil: ["domcontentloaded", "networkidle0"],
-    });
-
-    await page.evaluateHandle("document.fonts.ready");
-
-    return await page.pdf({
-      format: "A4",
-      printBackground: true,
-      preferCSSPageSize: true,
-    });
-  } finally {
-    await browser.close();
-  }
+// Puppeteer native browser automation is stripped in the container runtime.
+// PDF generation is handled client-side using jsPDF + html2canvas.
+export async function generatePdf(_html: string): Promise<Buffer> {
+  throw new Error("Server-side Puppeteer PDF generation is disabled in this environment. Client-side PDF export is used instead.");
 }

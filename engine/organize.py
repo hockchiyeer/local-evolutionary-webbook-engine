@@ -288,6 +288,12 @@ def build_chapter_sentence_pool(
     return sentence_pool
 
 
+def _canonical_item_key(value: str) -> str:
+    cleaned = re.sub(r"\s*\([^)]*\)", "", str(value or "")).strip().lower()
+    cleaned = re.sub(r"[^\w\s]", "", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
 def choose_items_for_chapter(
     items: Sequence[MutableMapping[str, Any]],
     keyword_set: Set[str],
@@ -298,21 +304,26 @@ def choose_items_for_chapter(
     *,
     tokenize: Callable[[str], Sequence[str]],
     normalize_space: Callable[[Any], str],
+    usage_counts: Dict[str, int] | None = None,
 ) -> List[MutableMapping[str, Any]]:
     scored_items = []
     fallback_items = []
 
     for item in items:
-        key = normalize_space(item.get(key_name, "")).lower()
-        if not key:
+        raw_key = normalize_space(item.get(key_name, "")).lower()
+        if not raw_key:
+            continue
+        canonical_key = _canonical_item_key(raw_key) if key_name == "term" else raw_key
+        if not canonical_key:
             continue
 
         text = normalize_space(text_getter(item))
         overlap = len(set(tokenize(text)).intersection(keyword_set))
-        freshness_bonus = 0.3 if key not in used_keys else -0.2
+        times_used = usage_counts.get(canonical_key, 0) if usage_counts is not None else (1 if canonical_key in used_keys or raw_key in used_keys else 0)
+        freshness_bonus = 0.4 if times_used == 0 else (-0.4 * times_used)
         score = overlap * 1.4 + freshness_bonus + min(len(tokenize(text)) / 25, 0.5)
 
-        if key not in used_keys:
+        if times_used == 0:
             scored_items.append((score, item))
         fallback_items.append((score, item))
 
@@ -323,12 +334,16 @@ def choose_items_for_chapter(
     selected_keys = set()
 
     for _, item in scored_items + fallback_items:
-        key = normalize_space(item.get(key_name, "")).lower()
-        if key in selected_keys:
+        raw_key = normalize_space(item.get(key_name, "")).lower()
+        canonical_key = _canonical_item_key(raw_key) if key_name == "term" else raw_key
+        if not canonical_key or canonical_key in selected_keys:
             continue
         selected.append(item)
-        selected_keys.add(key)
-        used_keys.add(key)
+        selected_keys.add(canonical_key)
+        used_keys.add(raw_key)
+        used_keys.add(canonical_key)
+        if usage_counts is not None:
+            usage_counts[canonical_key] = usage_counts.get(canonical_key, 0) + 1
         if len(selected) >= limit:
             break
 
